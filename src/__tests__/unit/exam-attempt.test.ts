@@ -40,6 +40,18 @@ describe('buildAttemptPageRecognition', () => {
         expect(first.status).toBe('succeeded');
     });
 
+    it('候选 ID 不受 32 位摘要碰撞、输入反序或加入无关候选影响', () => {
+        const firstCandidate = candidate({ recognizedAnswer: '1bk1jno-34416' });
+        const secondCandidate = candidate({ recognizedAnswer: '1n4idxz-76801' });
+        const build = (rows: typeof firstCandidate[]) => buildAttemptPageRecognition(1, { candidates: rows }, 'now');
+        const firstId = build([firstCandidate]).candidates[0].candidateId;
+        const secondId = build([secondCandidate]).candidates[0].candidateId;
+        expect(firstId).not.toBe(secondId);
+        expect(build([firstCandidate, secondCandidate]).candidates.map(({ candidateId }) => candidateId)).toEqual([firstId, secondId]);
+        expect(build([secondCandidate, firstCandidate]).candidates.map(({ candidateId }) => candidateId)).toEqual([secondId, firstId]);
+        expect(build([firstCandidate, candidate({ recognizedAnswer: '无关答案' })]).candidates[0].candidateId).toBe(firstId);
+    });
+
     it('把提取失败写入带错误码的 v1 信封', () => {
         expect(buildAttemptPageRecognition(1, null, '2026-11-09T00:00:00.000Z', 'AI_FAILED')).toMatchObject({
             version: 1, status: 'failed', candidates: [], errorCode: 'AI_FAILED',
@@ -106,11 +118,23 @@ describe('recognition 和区域 JSON 解析', () => {
         expect(parseAttemptPageRecognition('{bad')).toBeNull();
     });
 
-    it('坏 JSON 和非法区域返回安全空值，且可空 candidateId 得以保留', () => {
-        expect(parseAttemptRegionJson('{bad')).toEqual([]);
-        expect(parseAttemptRegionJson('[{"candidateId":"c1","x":0.1,"y":0.2,"width":0.3,"height":0.4},{"candidateId":null,"x":0,"y":0,"width":1,"height":1},{"candidateId":"bad","x":2,"y":0,"width":1,"height":1}]')).toEqual([
-            { candidateId: 'c1', x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
-            { candidateId: null, x: 0, y: 0, width: 1, height: 1 },
-        ]);
+    it('解析持久化区域对象，保留页序和可空候选 ID 并限制四个有效区域', () => {
+        const regions = [0, 0.1, 0.2, 0.3, 0.4].map((x) => ({ x, y: 0.2, width: 0.1, height: 0.2 }));
+        expect(parseAttemptRegionJson(JSON.stringify({ pageOrder: 2, candidateId: null, regions: regions.slice(0, 4) }))).toEqual({
+            pageOrder: 2,
+            candidateId: null,
+            regions: regions.slice(0, 4),
+        });
+        expect(parseAttemptRegionJson(JSON.stringify({ pageOrder: 1, candidateId: 'candidate-1', regions: regions.slice(0, 1) }))).toEqual({
+            pageOrder: 1, candidateId: 'candidate-1', regions: regions.slice(0, 1),
+        });
+        expect(parseAttemptRegionJson(JSON.stringify({ pageOrder: 2, candidateId: null, regions }))).toBeNull();
+    });
+
+    it('坏 JSON、坏页序、坏候选 ID 和非法区域安全返回 null', () => {
+        expect(parseAttemptRegionJson('{bad')).toBeNull();
+        expect(parseAttemptRegionJson(JSON.stringify({ pageOrder: 0, candidateId: null, regions: [] }))).toBeNull();
+        expect(parseAttemptRegionJson(JSON.stringify({ pageOrder: 1, candidateId: '', regions: [] }))).toBeNull();
+        expect(parseAttemptRegionJson(JSON.stringify({ pageOrder: 1, candidateId: null, regions: [{ x: 0, y: 0, width: 2, height: 1 }] }))).toBeNull();
     });
 });
