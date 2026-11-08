@@ -19,6 +19,7 @@ import { usePageTitle } from "@/lib/page-title";
 import { apiClient, ApiError } from "@/lib/api-client";
 import { useRunningTask } from "@/lib/hooks/use-running-task";
 import { formatExamScore, summarizeExamScores } from "@/lib/exam/exam-score";
+import { shouldReviewImportedExam } from "@/lib/exam/exam-import-navigation";
 import type { FigureAlign } from "@/lib/figure-scale";
 import type { ExamPaperDetail, PracticeResult } from "@/types/api";
 import { confirmDialog, toast } from "@/lib/feedback";
@@ -58,6 +59,10 @@ export default function ExamDetailPage() {
         load();
     }, [load]);
 
+    useEffect(() => {
+        if (paper && shouldReviewImportedExam(paper)) router.replace(`/exams/${paper.id}/import`);
+    }, [paper, router]);
+
     // 生成中时轮询进度
     useEffect(() => {
         if (paper?.status !== "generating") return;
@@ -66,7 +71,7 @@ export default function ExamDetailPage() {
     }, [paper, load]);
 
     if (notFound) return <div className="p-8 text-center">{t.exam.notFound}</div>;
-    if (!paper) return <PageLoading label={t.common.loading} />;
+    if (!paper || shouldReviewImportedExam(paper)) return <PageLoading label={t.common.loading} />;
 
     const readyCount = paper.questions.filter((question) => question.status === "ready").length;
     const recorded = paper.questions.some((question) => question.attempts.length > 0);

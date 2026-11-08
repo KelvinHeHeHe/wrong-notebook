@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
     createAndRecognizeExamImport,
+    examDateToISOString,
     prepareExamImportFiles,
 } from '@/lib/exam/exam-import-client';
 import type { ExamImportPreparationDeps } from '@/lib/exam/exam-import-client';
@@ -9,6 +10,11 @@ import type { ExamImportPreparationDeps } from '@/lib/exam/exam-import-client';
 const jpeg = (value: string) => `data:image/jpeg;base64,${value}`;
 
 describe('prepareExamImportFiles', () => {
+    it('考试日期按纯 UTC 日期保存，不受 Mac 本地时区影响', () => {
+        expect(examDateToISOString('2026-11-08')).toBe('2026-11-08T00:00:00.000Z');
+        expect(examDateToISOString('')).toBeNull();
+    });
+
     it('文字型 PDF 仍按完整页序渲染为页图，不走文本提取', async () => {
         const document = { numPages: 3, getPage: vi.fn() };
         const loadPdfDocument = vi.fn().mockResolvedValue(document);

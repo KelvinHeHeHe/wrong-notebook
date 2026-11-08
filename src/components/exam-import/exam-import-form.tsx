@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { apiClient } from '@/lib/api-client';
+import { examDateToISOString } from '@/lib/exam/exam-import-client';
 import { useExamImport } from '@/lib/hooks/use-exam-import';
 import type { Notebook } from '@/types/api';
 
@@ -41,7 +42,7 @@ export function ExamImportForm() {
             subjectId,
             gradeSemester: gradeSemester.trim() || null,
             examType: examType ? examType as 'unit' | 'midterm' | 'final' | 'daily' | 'other' : null,
-            examDate: examDate ? new Date(`${examDate}T00:00:00`).toISOString() : null,
+            examDate: examDateToISOString(examDate),
             totalScore: totalScore ? Number(totalScore) : null,
         });
     };

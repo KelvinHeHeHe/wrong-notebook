@@ -44,6 +44,11 @@ export type ExamImportWorkflowInput = Omit<CreateImportedExamInput, 'pages'> & {
 
 const IMAGE_FILE_PATTERN = /\.(?:avif|gif|heic|heif|jpe?g|png|webp)$/i;
 
+/** HTML date 输入是纯日期；固定为 UTC 午夜，避免本地时区换算导致回显前一天。 */
+export function examDateToISOString(value: string): string | null {
+    return value ? `${value}T00:00:00.000Z` : null;
+}
+
 function isPdf(file: File): boolean {
     return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
 }
