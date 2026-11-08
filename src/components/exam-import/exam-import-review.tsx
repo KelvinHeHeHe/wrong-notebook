@@ -26,6 +26,13 @@ export function ExamImportReview({ paperId }: { paperId: string }) {
                 <CardHeader><CardTitle className="text-lg">{text.metadata}</CardTitle></CardHeader>
                 <CardContent className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-1 sm:col-span-2"><Label htmlFor="review-title">{t.examImport.paperTitle}</Label><Input id="review-title" value={review.title} onChange={(event) => review.setTitle(event.target.value)} /></div>
+                    <div className="space-y-1">
+                        <Label htmlFor="review-notebook">{t.examImport.notebook}</Label>
+                        <select id="review-notebook" name="subjectId" required value={review.subjectId} onChange={(event) => review.setSubjectId(event.target.value)} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm">
+                            <option value="">{t.examImport.selectNotebook}</option>
+                            {review.notebooks.map((notebook) => <option key={notebook.id} value={notebook.id}>{notebook.name}</option>)}
+                        </select>
+                    </div>
                     <div className="space-y-1"><Label htmlFor="review-grade">{t.examImport.gradeSemester}</Label><Input id="review-grade" value={review.gradeSemester} onChange={(event) => review.setGradeSemester(event.target.value)} /></div>
                     <div className="space-y-1">
                         <Label htmlFor="review-type">{t.examImport.examType}</Label>
@@ -70,6 +77,7 @@ export function ExamImportReview({ paperId }: { paperId: string }) {
                             <div className="space-y-3">
                                 {pageQuestions.map((question, index) => (
                                     <ImportQuestionCard key={question.key} question={question} pageImage={page.imageData}
+                                        pageOrders={review.pages.filter((candidate) => candidate.role === 'questions').map((candidate) => candidate.order)}
                                         canMoveUp={index > 0} canMoveDown={index < pageQuestions.length - 1}
                                         onChange={review.updateQuestion} onMove={(offset) => review.moveQuestion(question.key, offset)}
                                         onDelete={() => review.deleteQuestion(question.key)} />

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
     const tx = {
-        examPaper: { create: vi.fn(), update: vi.fn() },
+        examPaper: { create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
         examPaperPage: { create: vi.fn(), update: vi.fn() },
         examQuestion: { deleteMany: vi.fn() },
     };
@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
         user: { findUnique: vi.fn() },
         subject: { findFirst: vi.fn() },
         examPaper: { findUnique: vi.fn(), findMany: vi.fn() },
+        examPaperPage: { findMany: vi.fn() },
         transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
         session: { user: { email: 'user@example.com' }, expires: '2099-01-01' },
     };
@@ -21,6 +22,7 @@ vi.mock('@/lib/prisma', () => ({
         user: mocks.user,
         subject: mocks.subject,
         examPaper: mocks.examPaper,
+        examPaperPage: mocks.examPaperPage,
         $transaction: mocks.transaction,
     },
 }));
@@ -38,13 +40,15 @@ const json = (url: string, body: object) => new Request(url, {
     headers: { 'Content-Type': 'application/json' },
 });
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
+const PNG_1X1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+const pngData = (marker: number) => `data:image/png;base64,${Buffer.concat([PNG_1X1, Buffer.from([marker])]).toString('base64')}`;
 const page = (order: number, overrides: Record<string, unknown> = {}) => ({
     order,
     role: 'questions',
-    imageData: `data:image/jpeg;base64,cGFnZS0${order}`,
-    mimeType: 'image/jpeg',
-    width: 1200,
-    height: 1600,
+    imageData: pngData(order),
+    mimeType: 'image/png',
+    width: 1,
+    height: 1,
     ...overrides,
 });
 
@@ -59,6 +63,7 @@ describe('外部整卷草稿与页面 API', () => {
             status: 'importing',
             pages: [{ id: 'page-1', order: 1, role: 'questions' }],
         });
+        mocks.tx.examPaper.updateMany.mockResolvedValue({ count: 1 });
     });
 
     it('在一个事务中创建 1～20 页 imported 草稿并由服务端写入 checksum', async () => {
@@ -109,6 +114,22 @@ describe('外部整卷草稿与页面 API', () => {
         expect(mocks.tx.examPaper.create).not.toHaveBeenCalled();
     });
 
+    it('服务端拒绝伪造图片内容和与真实像素不符的声明尺寸', async () => {
+        const invalidContent = await CREATE_IMPORTED(json('http://localhost/api/exams/import', {
+            title: '伪造图片', subjectId: 'subject-1',
+            pages: [page(1, { imageData: 'data:image/png;base64,bm90LWltYWdl' })],
+        }));
+        const wrongDimensions = await CREATE_IMPORTED(json('http://localhost/api/exams/import', {
+            title: '错误尺寸', subjectId: 'subject-1', pages: [page(1, { width: 2 })],
+        }));
+
+        expect(invalidContent.status).toBe(400);
+        expect(await invalidContent.json()).toMatchObject({ message: 'EXAM_PAGE_INVALID' });
+        expect(wrongDimensions.status).toBe(400);
+        expect(await wrongDimensions.json()).toMatchObject({ message: 'EXAM_PAGE_DIMENSIONS_MISMATCH' });
+        expect(mocks.tx.examPaper.create).not.toHaveBeenCalled();
+    });
+
     it('在数据库调用前拒绝跨角色重复物理页和重复图片', async () => {
         const imageData = 'data:image/jpeg;base64,c2FtZQ==';
         const response = await CREATE_IMPORTED(json('http://localhost/api/exams/import', {
@@ -131,6 +152,7 @@ describe('外部整卷草稿与页面 API', () => {
             userId: 'user-1',
             origin: 'imported',
             status: 'review',
+            updatedAt: new Date('2026-11-08T00:00:00Z'),
             pages: [{
                 id: 'page-1', order: 1, role: 'questions', checksum: 'old',
                 imageData: 'data:image/jpeg;base64,b2xk', mimeType: 'image/jpeg', width: 1000, height: 1400,
@@ -140,7 +162,7 @@ describe('外部整卷草稿与页面 API', () => {
         mocks.tx.examPaper.update.mockResolvedValue({ id: 'paper-1', status: 'importing' });
 
         const response = await UPSERT_PAGES(json('http://localhost/api/exams/paper-1/pages', {
-            pages: [page(1, { role: 'answer_key', imageData: 'data:image/jpeg;base64,bmV3' })],
+            pages: [page(1, { role: 'answer_key', imageData: pngData(99) })],
         }), params('paper-1'));
 
         expect(response.status).toBe(200);
@@ -149,7 +171,13 @@ describe('外部整卷草稿与页面 API', () => {
             data: expect.objectContaining({ role: 'answer_key', checksum: expect.stringMatching(/^[a-f0-9]{64}$/) }),
         }));
         expect(mocks.tx.examQuestion.deleteMany).toHaveBeenCalledWith({ where: { paperId: 'paper-1', pageNumber: 1 } });
-        expect(mocks.tx.examPaper.update).toHaveBeenCalledWith({ where: { id: 'paper-1' }, data: { status: 'importing' } });
+        expect(mocks.tx.examPaper.updateMany).toHaveBeenCalledWith({
+            where: {
+                id: 'paper-1', userId: 'user-1', origin: 'imported', status: { not: 'ready' },
+                updatedAt: new Date('2026-11-08T00:00:00Z'),
+            },
+            data: { status: 'importing' },
+        });
     });
 
     it('追加新物理页但不允许修改他人或已发布试卷', async () => {
@@ -164,6 +192,22 @@ describe('外部整卷草稿与页面 API', () => {
         expect(mocks.tx.examPaperPage.create).not.toHaveBeenCalled();
     });
 
+    it('事务开始前试卷若已被另一请求发布，不覆盖页面或降级状态', async () => {
+        mocks.examPaper.findUnique.mockResolvedValue({
+            id: 'paper-1', userId: 'user-1', origin: 'imported', status: 'review',
+            updatedAt: new Date('2026-11-08T00:00:00Z'), pages: [],
+        });
+        mocks.tx.examPaper.updateMany.mockResolvedValueOnce({ count: 0 });
+
+        const response = await UPSERT_PAGES(json('http://localhost/api/exams/paper-1/pages', {
+            pages: [page(1)],
+        }), params('paper-1'));
+
+        expect(response.status).toBe(409);
+        expect(mocks.tx.examPaperPage.create).not.toHaveBeenCalled();
+        expect(mocks.tx.examPaper.update).not.toHaveBeenCalled();
+    });
+
     it('列表和详情为 imported 试卷返回来源、元数据与有序页面', async () => {
         mocks.examPaper.findMany.mockResolvedValue([{
             id: 'paper-1', title: '导入卷', origin: 'imported', subjectId: 'subject-1', gradeSemester: 'primary_3_1',
@@ -172,20 +216,24 @@ describe('外部整卷草稿与页面 API', () => {
         }]);
         mocks.examPaper.findUnique.mockResolvedValue({
             id: 'paper-1', userId: 'user-1', title: '导入卷', status: 'review', origin: 'imported',
-            pages: [{ id: 'page-2', order: 2, role: 'answer_key', imageData: 'data:image/jpeg;base64,Yg==', mimeType: 'image/jpeg', width: 100, height: 100, checksum: 'b' },
-                { id: 'page-1', order: 1, role: 'questions', imageData: 'data:image/jpeg;base64,YQ==', mimeType: 'image/jpeg', width: 100, height: 100, checksum: 'a' }],
             questions: [{
                 id: 'question-1', order: 1, status: 'ready', externalNumber: '1', pageNumber: 1,
                 regionJson: '[{"x":0,"y":0,"width":1,"height":0.5}]', recognitionConfidence: null,
                 errorItem: null, practiceRecords: [], score: 5, questionType: null, figureScale: 100, figureAlign: 'center', answerSpacePx: null,
             }],
         });
+        mocks.examPaperPage.findMany.mockResolvedValue([
+            { id: 'page-1', order: 1, role: 'questions', imageData: 'data:image/jpeg;base64,YQ==', mimeType: 'image/jpeg', width: 100, height: 100, checksum: 'a' },
+            { id: 'page-2', order: 2, role: 'answer_key', imageData: 'data:image/jpeg;base64,Yg==', mimeType: 'image/jpeg', width: 100, height: 100, checksum: 'b' },
+        ]);
 
         const list = await (await LIST()).json();
-        const detail = await (await DETAIL(new Request('http://localhost'), params('paper-1'))).json();
+        const detail = await (await DETAIL(new Request('http://localhost/api/exams/paper-1'), params('paper-1'))).json();
+        const reviewDetail = await (await DETAIL(new Request('http://localhost/api/exams/paper-1?includePages=1'), params('paper-1'))).json();
 
         expect(list[0]).toMatchObject({ origin: 'imported', subjectId: 'subject-1', examType: 'unit', questionCount: 1 });
-        expect(detail.pages.map((item: { order: number }) => item.order)).toEqual([1, 2]);
+        expect(detail).not.toHaveProperty('pages');
+        expect(reviewDetail.pages.map((item: { order: number }) => item.order)).toEqual([1, 2]);
         expect(detail.questions[0]).toMatchObject({ externalNumber: '1', pageNumber: 1 });
     });
 });

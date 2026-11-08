@@ -27,7 +27,7 @@ export interface ExamImportPreparationDeps {
 }
 
 export interface ExamRecognitionResult {
-    status: 'review';
+    status: 'importing' | 'review' | 'ready';
     successes: Array<{ pageOrder: number; questionCount: number }>;
     failures: Array<{ pageOrder: number; error: string }>;
 }

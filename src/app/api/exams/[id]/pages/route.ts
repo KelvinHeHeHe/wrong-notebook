@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { conflict, internalError, notFound, validationError } from '@/lib/api-errors';
 import { withUser } from '@/lib/api-handler';
 import type { AuthenticatedContext } from '@/lib/api-handler';
-import { checksumExamPage } from '@/lib/exam/exam-import';
+import { ExamPageImageError, validateExamPageImages } from '@/lib/exam/exam-page-image';
 import { createLogger } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import { MAX_IMPORTED_EXAM_PAGES, upsertExamPagesSchema } from '@/lib/schemas/exam';
@@ -26,6 +26,7 @@ export const POST = withUser(async (
                 userId: true,
                 origin: true,
                 status: true,
+                updatedAt: true,
                 pages: {
                     select: { id: true, order: true, role: true, imageData: true, mimeType: true, width: true, height: true, checksum: true },
                 },
@@ -43,15 +44,30 @@ export const POST = withUser(async (
         const newPageCount = parsed.data.pages.filter((page) => !existingOrders.has(page.order)).length;
         if (paper.pages.length + newPageCount > MAX_IMPORTED_EXAM_PAGES) return validationError('EXAM_PAGE_LIMIT_EXCEEDED');
 
-        const pages = await Promise.all(parsed.data.pages.map(async (page) => ({
-            ...page,
-            checksum: await checksumExamPage(page.imageData),
-        })));
+        let pages;
+        try {
+            pages = await validateExamPageImages(parsed.data.pages);
+        } catch (error) {
+            if (error instanceof ExamPageImageError) return validationError(error.code);
+            throw error;
+        }
         const untouchedChecksums = new Set(paper.pages.filter((page) => !incomingOrders.has(page.order)).map((page) => page.checksum));
         if (pages.some((page) => untouchedChecksums.has(page.checksum))) return conflict('EXAM_PAGE_DUPLICATE');
 
         const existingByOrder = new Map(paper.pages.map((page) => [page.order, page]));
         const updatedPages = await prisma.$transaction(async (tx) => {
+            const lock = await tx.examPaper.updateMany({
+                where: {
+                    id,
+                    userId: user.id,
+                    origin: 'imported',
+                    status: { not: 'ready' },
+                    updatedAt: paper.updatedAt,
+                },
+                data: { status: 'importing' },
+            });
+            if (lock.count === 0) return null;
+
             const result = [];
             for (const page of pages) {
                 const existing = existingByOrder.get(page.order);
@@ -73,9 +89,9 @@ export const POST = withUser(async (
                     result.push(await tx.examPaperPage.create({ data: { paperId: id, order: page.order, ...data } }));
                 }
             }
-            await tx.examPaper.update({ where: { id }, data: { status: 'importing' } });
             return result;
         });
+        if (!updatedPages) return conflict('IMPORTED_EXAM_CHANGED');
 
         return NextResponse.json({
             paperId: id,

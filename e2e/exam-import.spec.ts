@@ -9,6 +9,7 @@ test('[E2E-EXAM-IMPORT] 两页照片部分失败后单页重试、校对发布�
     await scenario.control({ splitFailNext: 1 });
     const beforeItems = await scenario.db.errorItem.count({ where: { userId: scenario.user.id } });
     const beforeRecords = await scenario.db.practiceRecord.count({ where: { userId: scenario.user.id } });
+    const beforeAttempts = await scenario.db.examAttempt.count({ where: { userId: scenario.user.id } });
 
     await page.goto('/exams/import');
     await page.getByLabel('试卷标题').fill('E2E 外部整卷周测');
@@ -29,6 +30,7 @@ test('[E2E-EXAM-IMPORT] 两页照片部分失败后单页重试、校对发布�
     expect(draft.questions.every((question) => question.pageNumber === 2)).toBeTruthy();
     expect(await scenario.db.errorItem.count({ where: { userId: scenario.user.id } })).toBe(beforeItems);
     expect(await scenario.db.practiceRecord.count({ where: { userId: scenario.user.id } })).toBe(beforeRecords);
+    expect(await scenario.db.examAttempt.count({ where: { userId: scenario.user.id } })).toBe(beforeAttempts);
 
     await page.getByRole('button', { name: '重试第 1 页' }).click();
     await expect(page.getByText('第 1 页未识别到题目', { exact: true })).toHaveCount(0, { timeout: 30000 });
@@ -40,6 +42,7 @@ test('[E2E-EXAM-IMPORT] 两页照片部分失败后单页重试、校对发布�
     expect(await scenario.db.examPaper.findUniqueOrThrow({ where: { id: paperId } })).toMatchObject({ status: 'ready', origin: 'imported' });
     expect(await scenario.db.errorItem.count({ where: { userId: scenario.user.id } })).toBe(beforeItems);
     expect(await scenario.db.practiceRecord.count({ where: { userId: scenario.user.id } })).toBe(beforeRecords);
+    expect(await scenario.db.examAttempt.count({ where: { userId: scenario.user.id } })).toBe(beforeAttempts);
 
     await page.locator(`a[href="/exams/${paperId}/print"]`).click();
     await expect(page).toHaveURL(`/exams/${paperId}/print`);

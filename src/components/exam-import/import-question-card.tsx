@@ -27,6 +27,7 @@ export interface ImportedQuestionFormValue {
 interface ImportQuestionCardProps {
     question: ImportedQuestionFormValue;
     pageImage: string;
+    pageOrders: number[];
     canMoveUp: boolean;
     canMoveDown: boolean;
     onChange: (question: ImportedQuestionFormValue) => void;
@@ -37,6 +38,7 @@ interface ImportQuestionCardProps {
 export function ImportQuestionCard({
     question,
     pageImage,
+    pageOrders,
     canMoveUp,
     canMoveDown,
     onChange,
@@ -69,7 +71,13 @@ export function ImportQuestionCard({
                         <Label htmlFor={fieldId('score')}>{text.score}</Label>
                         <Input id={fieldId('score')} name="score" type="number" min="0" max="1000" step="0.1" value={question.score} onChange={(event) => update({ score: event.target.value })} />
                     </div>
-                    <div className="col-span-2 space-y-1">
+                    <div className="space-y-1">
+                        <Label htmlFor={fieldId('page')}>{t.examImport.pageNumber}</Label>
+                        <select id={fieldId('page')} name="pageNumber" value={question.pageNumber} onChange={(event) => update({ pageNumber: Number(event.target.value) })} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm">
+                            {pageOrders.map((order) => <option key={order} value={order}>{order}</option>)}
+                        </select>
+                    </div>
+                    <div className="space-y-1">
                         <Label htmlFor={fieldId('type')}>{text.questionType}</Label>
                         <Input id={fieldId('type')} name="questionType" maxLength={200} value={question.questionType} onChange={(event) => update({ questionType: event.target.value })} />
                     </div>

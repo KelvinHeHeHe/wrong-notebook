@@ -67,6 +67,17 @@ function paperFixture(twoQuestions = false): ExamPaperDetail {
     };
 }
 
+const notebooks = [
+    { id: 'subject-1', name: '数学', userId: 'user-1', createdAt: '', updatedAt: '' },
+    { id: 'subject-2', name: '语文', userId: 'user-1', createdAt: '', updatedAt: '' },
+];
+
+function mockLoadedPaper(paper: ExamPaperDetail) {
+    vi.mocked(apiClient.get).mockImplementation(async (url) => (
+        url === '/api/notebooks' ? notebooks : paper
+    ) as never);
+}
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -75,7 +86,7 @@ beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    vi.mocked(apiClient.get).mockResolvedValue(paperFixture());
+    mockLoadedPaper(paperFixture());
     vi.mocked(apiClient.post).mockResolvedValue({ status: 'review', successes: [], failures: [] });
     vi.mocked(apiClient.patch).mockResolvedValue({ id: 'paper-1', status: 'review', totalScore: null });
 });
@@ -93,6 +104,7 @@ async function flush() {
 async function renderReview() {
     await act(async () => root.render(<LanguageProvider><ExamImportReview paperId="paper-1" /></LanguageProvider>));
     await flush();
+    expect(apiClient.get).toHaveBeenCalledWith('/api/exams/paper-1?includePages=1');
 }
 
 function clickButton(text: string) {
@@ -124,6 +136,19 @@ describe('ExamImportReview', () => {
             pageOrders: [2],
             language: 'zh',
         }, { recoverable: true, timeout: 600_000 });
+        expect(apiClient.get).toHaveBeenCalledTimes(4);
+    });
+
+    it('重试接口返回页面失败时显示错误且不伪装成成功刷新', async () => {
+        vi.mocked(apiClient.post).mockResolvedValueOnce({
+            status: 'review', successes: [], failures: [{ pageOrder: 2, error: 'AI_TIMEOUT_ERROR' }],
+        });
+        await renderReview();
+
+        await clickButton('重试第 2 页');
+        await flush();
+
+        expect(container.textContent).toContain('页面重试失败');
         expect(apiClient.get).toHaveBeenCalledTimes(2);
     });
 
@@ -132,7 +157,7 @@ describe('ExamImportReview', () => {
         fixture.questions.push({
             ...fixture.questions[0], id: 'question-2', order: 2, sourceShortId: 'IMP002001', pageNumber: 2, questionText: '答案页误识别题目',
         });
-        vi.mocked(apiClient.get).mockResolvedValue(fixture);
+        mockLoadedPaper(fixture);
         await renderReview();
 
         const pageTwoRole = container.querySelector('select[data-page-order="2"]') as HTMLSelectElement;
@@ -152,7 +177,7 @@ describe('ExamImportReview', () => {
     });
 
     it('支持题目新增删除重排、字段和区域编辑', async () => {
-        vi.mocked(apiClient.get).mockResolvedValue(paperFixture(true));
+        mockLoadedPaper(paperFixture(true));
         await renderReview();
 
         const secondCard = container.querySelector('[data-question-key="question-2"]') as HTMLElement;
@@ -185,11 +210,59 @@ describe('ExamImportReview', () => {
         }));
     });
 
+    it('支持把题目移动到另一题目页并保存新页码', async () => {
+        await renderReview();
+        const card = container.querySelector('[data-question-key="question-1"]') as HTMLElement;
+        const pageSelect = card.querySelector('select[name="pageNumber"]') as HTMLSelectElement;
+
+        await act(async () => changeSelect(pageSelect, '2'));
+        await clickButton('保存草稿');
+        await flush();
+
+        expect(apiClient.patch).toHaveBeenCalledWith('/api/exams/paper-1', expect.objectContaining({
+            questions: [expect.objectContaining({ id: 'question-1', pageNumber: 2 })],
+        }));
+    });
+
+    it('校对时可以修正学科错题本', async () => {
+        await renderReview();
+        const subject = container.querySelector('#review-notebook') as HTMLSelectElement;
+
+        await act(async () => changeSelect(subject, 'subject-2'));
+        await clickButton('保存草稿');
+        await flush();
+
+        expect(apiClient.patch).toHaveBeenCalledWith('/api/exams/paper-1', expect.objectContaining({
+            subjectId: 'subject-2',
+        }));
+    });
+
+    it('允许保存尚未填写题干和区域的草稿，但发布时提示补全', async () => {
+        const fixture = paperFixture();
+        fixture.questions[0].questionText = '';
+        fixture.questions[0].regionJson = '[]';
+        mockLoadedPaper(fixture);
+        await renderReview();
+
+        await clickButton('保存草稿');
+        await flush();
+
+        expect(apiClient.patch).toHaveBeenCalledWith('/api/exams/paper-1', expect.objectContaining({
+            publish: false,
+            questions: [expect.objectContaining({ questionText: '', regions: [] })],
+        }));
+
+        vi.mocked(apiClient.patch).mockClear();
+        await clickButton('发布试卷');
+        expect(container.textContent).toContain('请填写所有题干');
+        expect(apiClient.patch).not.toHaveBeenCalled();
+    });
+
     it('发布成功后进入现有试卷详情与打印流程', async () => {
         const fixture = paperFixture();
         fixture.pages![1].role = 'answer_key';
         fixture.totalScore = 5;
-        vi.mocked(apiClient.get).mockResolvedValue(fixture);
+        mockLoadedPaper(fixture);
         vi.mocked(apiClient.patch).mockResolvedValue({ id: 'paper-1', status: 'ready', totalScore: 5 });
         await renderReview();
 

@@ -6,6 +6,7 @@ import {
     computePdfOutputSize,
     computePdfRenderScale,
     MAX_SCAN_PAGES_PER_IMPORT,
+    nextPdfCompressionStep,
     parsePageRanges,
 } from "@/lib/import/file-parsers/pdf/render-pages";
 import { DEFAULT_IMAGE_LIMITS } from "@/lib/image-pipeline";
@@ -49,6 +50,23 @@ describe("parsePageRanges", () => {
             ok: true,
             pages: Array.from({ length: 20 }, (_, i) => i + 1),
         });
+    });
+});
+
+describe("nextPdfCompressionStep", () => {
+    it("超出体积时先逐级降低质量，达到下限后缩小尺寸并恢复初始质量", () => {
+        const limits = { ...DEFAULT_IMAGE_LIMITS, startQuality: 0.9, minQuality: 0.8 };
+
+        expect(nextPdfCompressionStep(1000, 1400, 0.9, limits)).toEqual({
+            width: 1000, height: 1400, quality: 0.85, rerender: false,
+        });
+        expect(nextPdfCompressionStep(1000, 1400, 0.8, limits)).toEqual({
+            width: 850, height: 1190, quality: 0.9, rerender: true,
+        });
+    });
+
+    it("尺寸已无法继续缩小时返回 null，避免无限重试", () => {
+        expect(nextPdfCompressionStep(1, 1, DEFAULT_IMAGE_LIMITS.minQuality, DEFAULT_IMAGE_LIMITS)).toBeNull();
     });
 });
 

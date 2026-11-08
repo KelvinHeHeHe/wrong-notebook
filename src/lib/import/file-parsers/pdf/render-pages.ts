@@ -121,6 +121,33 @@ export interface RenderPdfPagesOptions {
     onProgress?: (completed: number, total: number) => void;
 }
 
+const PDF_QUALITY_STEP = 0.05;
+const PDF_SHRINK_STEP = 0.85;
+
+export interface PdfCompressionStep {
+    width: number;
+    height: number;
+    quality: number;
+    rerender: boolean;
+}
+
+/** 体积超限时先降 JPEG 质量；到达质量下限后缩小像素并从初始质量重新编码。 */
+export function nextPdfCompressionStep(
+    width: number,
+    height: number,
+    quality: number,
+    limits: Pick<ImageOutputLimits, "startQuality" | "minQuality">,
+): PdfCompressionStep | null {
+    const lowerQuality = Math.round((quality - PDF_QUALITY_STEP) * 100) / 100;
+    if (lowerQuality >= limits.minQuality) {
+        return { width, height, quality: lowerQuality, rerender: false };
+    }
+    const nextWidth = Math.max(1, Math.floor(width * PDF_SHRINK_STEP));
+    const nextHeight = Math.max(1, Math.floor(height * PDF_SHRINK_STEP));
+    if (nextWidth === width && nextHeight === height) return null;
+    return { width: nextWidth, height: nextHeight, quality: limits.startQuality, rerender: true };
+}
+
 /** 把 canvas 内容编码为 JPEG data URL 并估算字节数 */
 async function canvasToJpegDataUrl(canvas: HTMLCanvasElement, quality: number): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -165,7 +192,7 @@ export async function renderPdfPages(
             const pageNumber = options.pages[i];
             const page = await doc.getPage(pageNumber);
             const baseViewport = page.getViewport({ scale: 1 });
-            const output = computePdfOutputSize(baseViewport.width, baseViewport.height, limits);
+            let output = computePdfOutputSize(baseViewport.width, baseViewport.height, limits);
 
             if (!canvas || !context) {
                 canvas = document.createElement("canvas");
@@ -173,21 +200,41 @@ export async function renderPdfPages(
                 if (!created) throw new Error("CANVAS_UNSUPPORTED");
                 context = created;
             }
-            canvas.width = output.width;
-            canvas.height = output.height;
-            context.fillStyle = "#ffffff";
-            context.fillRect(0, 0, output.width, output.height);
+            let quality = limits.startQuality;
+            let dataUrl = "";
+            let bytes = 0;
+            let rerender = true;
+            while (true) {
+                if (rerender) {
+                    canvas.width = output.width;
+                    canvas.height = output.height;
+                    context.fillStyle = "#ffffff";
+                    context.fillRect(0, 0, output.width, output.height);
 
-            const renderViewport = page.getViewport({ scale: output.scale });
-            await page.render({ canvasContext: context, viewport: renderViewport }).promise;
+                    const renderViewport = page.getViewport({ scale: output.width / baseViewport.width });
+                    await page.render({ canvasContext: context, viewport: renderViewport }).promise;
+                }
 
-            const dataUrl = await canvasToJpegDataUrl(canvas, limits.startQuality);
+                dataUrl = await canvasToJpegDataUrl(canvas, quality);
+                bytes = dataUrlBytes(dataUrl);
+                if (bytes <= limits.maxBytes) break;
+
+                const next = nextPdfCompressionStep(output.width, output.height, quality, limits);
+                if (!next) throw new Error("IMAGE_TOO_LARGE");
+                output = {
+                    width: next.width,
+                    height: next.height,
+                    scale: next.width / baseViewport.width,
+                };
+                quality = next.quality;
+                rerender = next.rerender;
+            }
             results.push({
                 pageNumber,
                 dataUrl,
                 width: output.width,
                 height: output.height,
-                bytes: dataUrlBytes(dataUrl),
+                bytes,
             });
 
             // 释放 canvas 内存：把尺寸清零（保留 canvas 复用，但释放像素缓冲）

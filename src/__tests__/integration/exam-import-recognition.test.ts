@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
     const tx = {
+        examPaper: {
+            findUnique: vi.fn(),
+        },
         examQuestion: {
             deleteMany: vi.fn(),
             createMany: vi.fn(),
@@ -12,7 +15,7 @@ const mocks = vi.hoisted(() => {
     return {
         tx,
         user: { findUnique: vi.fn() },
-        examPaper: { findUnique: vi.fn(), update: vi.fn() },
+        examPaper: { findUnique: vi.fn(), updateMany: vi.fn() },
         transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
         splitQuestionsForUser: vi.fn(),
         session: { user: { email: 'user@example.com' }, expires: '2099-01-01' },
@@ -63,17 +66,22 @@ describe('外部试卷按页识别', () => {
             id: 'paper-1',
             userId: 'user-1',
             origin: 'imported',
-            status: 'importing',
+            status: 'review',
+            updatedAt: new Date('2026-11-08T00:00:00Z'),
             pages: [
                 { id: 'page-1', order: 1, role: 'questions', imageData: 'data:image/jpeg;base64,cGFnZTE=', mimeType: 'image/jpeg' },
                 { id: 'page-2', order: 2, role: 'questions', imageData: 'data:image/jpeg;base64,cGFnZTI=', mimeType: 'image/jpeg' },
             ],
         });
         mocks.tx.examQuestion.findMany.mockResolvedValue([{ id: 'question-1' }]);
+        mocks.tx.examPaper.findUnique.mockImplementation(({ select }: { select?: { pages?: unknown } }) => Promise.resolve({
+            status: 'importing',
+            ...(select?.pages ? { pages: [{ role: 'questions', checksum: null }] } : {}),
+        }));
         mocks.tx.examQuestion.createMany.mockResolvedValue({ count: 1 });
         mocks.tx.examQuestion.deleteMany.mockResolvedValue({ count: 1 });
         mocks.tx.examQuestion.update.mockResolvedValue({ id: 'question-1' });
-        mocks.examPaper.update.mockResolvedValue({ id: 'paper-1', status: 'review' });
+        mocks.examPaper.updateMany.mockResolvedValue({ count: 1 });
     });
 
     it('两页一成一败时保留成功页并继续处理，最终进入 review', async () => {
@@ -96,7 +104,13 @@ describe('外部试卷按页识别', () => {
         expect(mocks.transaction).toHaveBeenCalledTimes(1);
         expect(mocks.tx.examQuestion.deleteMany).toHaveBeenCalledWith({ where: { paperId: 'paper-1', pageNumber: 1 } });
         expect(mocks.tx.examQuestion.deleteMany).not.toHaveBeenCalledWith({ where: { paperId: 'paper-1', pageNumber: 2 } });
-        expect(mocks.examPaper.update).toHaveBeenCalledWith({ where: { id: 'paper-1' }, data: { status: 'review' } });
+        expect(mocks.examPaper.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({
+                id: 'paper-1', userId: 'user-1', origin: 'imported', status: { not: 'ready' },
+                updatedAt: new Date('2026-11-08T00:00:00Z'),
+            }),
+            data: expect.objectContaining({ status: 'review', updatedAt: expect.any(Date) }),
+        }));
     });
 
     it('失败页重试成功时只替换该页并重排全卷顺序', async () => {
@@ -136,6 +150,52 @@ describe('外部试卷按页识别', () => {
         });
         expect(mocks.transaction).not.toHaveBeenCalled();
         expect(mocks.tx.examQuestion.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('AI 返回后若试卷已经发布，不写入迟到的识别结果且不降级状态', async () => {
+        mocks.splitQuestionsForUser.mockResolvedValueOnce(splitResult('1'));
+        mocks.tx.examPaper.findUnique.mockResolvedValueOnce({ status: 'ready', pages: [{ role: 'questions', checksum: null }] });
+        mocks.examPaper.findUnique
+            .mockResolvedValueOnce({
+                id: 'paper-1', userId: 'user-1', origin: 'imported', status: 'review',
+                updatedAt: new Date('2026-11-08T00:00:00Z'),
+                pages: [{ id: 'page-1', order: 1, role: 'questions', imageData: 'data:image/jpeg;base64,cGFnZTE=', mimeType: 'image/jpeg', checksum: null }],
+            })
+            .mockResolvedValueOnce({ status: 'ready' });
+
+        const response = await RECOGNIZE(request({ pageOrders: [1] }), params);
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+            successes: [],
+            failures: [{ pageOrder: 1, error: 'IMPORTED_EXAM_ALREADY_PUBLISHED' }],
+            status: 'ready',
+        });
+        expect(mocks.tx.examQuestion.deleteMany).not.toHaveBeenCalled();
+        expect(mocks.tx.examQuestion.createMany).not.toHaveBeenCalled();
+    });
+
+    it('AI 返回后若页面已改为答案页，不写入该页题目', async () => {
+        mocks.splitQuestionsForUser.mockResolvedValueOnce(splitResult('1'));
+        mocks.tx.examPaper.findUnique.mockResolvedValueOnce({ status: 'review', pages: [{ role: 'answer_key', checksum: null }] });
+
+        const response = await RECOGNIZE(request({ pageOrders: [1] }), params);
+
+        expect(await response.json()).toMatchObject({
+            successes: [],
+            failures: [{ pageOrder: 1, error: 'EXAM_PAGE_CHANGED' }],
+        });
+        expect(mocks.tx.examQuestion.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('开始识别前试卷若已被并发修改，停止调用 AI 并返回冲突', async () => {
+        mocks.examPaper.updateMany.mockResolvedValueOnce({ count: 0 });
+
+        const response = await RECOGNIZE(request({ pageOrders: [1] }), params);
+
+        expect(response.status).toBe(409);
+        expect(mocks.splitQuestionsForUser).not.toHaveBeenCalled();
+        expect(mocks.transaction).not.toHaveBeenCalled();
     });
 
     it('拒绝识别他人试卷、已发布试卷和答案页', async () => {

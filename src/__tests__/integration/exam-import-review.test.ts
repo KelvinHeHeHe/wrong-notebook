@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
     const tx = {
-        examPaper: { update: vi.fn() },
+        examPaper: { update: vi.fn(), updateMany: vi.fn() },
         examPaperPage: { update: vi.fn() },
         examQuestion: { deleteMany: vi.fn(), update: vi.fn(), create: vi.fn() },
     };
@@ -43,6 +43,7 @@ const basePaper = () => ({
     userId: 'user-1',
     origin: 'imported',
     status: 'review',
+    updatedAt: new Date('2026-11-08T00:00:00Z'),
     subjectId: 'subject-1',
     pages: [
         { id: 'page-1', order: 1, role: 'questions' },
@@ -80,6 +81,7 @@ describe('外部试卷校对与发布', () => {
         mocks.subject.findFirst.mockResolvedValue({ id: 'subject-1' });
         mocks.examPaper.findUnique.mockResolvedValue(basePaper());
         mocks.tx.examPaper.update.mockResolvedValue({ id: 'paper-1', status: 'review', totalScore: 10 });
+        mocks.tx.examPaper.updateMany.mockResolvedValue({ count: 1 });
         mocks.tx.examPaperPage.update.mockResolvedValue({});
         mocks.tx.examQuestion.deleteMany.mockResolvedValue({ count: 1 });
         mocks.tx.examQuestion.update.mockResolvedValue({});
@@ -140,9 +142,9 @@ describe('外部试卷校对与发布', () => {
         expect(mocks.transaction).not.toHaveBeenCalled();
     });
 
-    it('空题干和非法区域由共享 schema 拒绝', async () => {
+    it('发布时拒绝空题干，非法区域始终由共享 schema 拒绝', async () => {
         const emptyText = await PATCH(request(draft({
-            questions: [{ id: 'question-1', pageNumber: 1, regions: [region], questionText: ' ', score: 10 }],
+            questions: [{ id: 'question-1', pageNumber: 1, regions: [region], questionText: ' ', score: 10 }], publish: true,
         })), params);
         const badRegion = await PATCH(request(draft({
             questions: [{ id: 'question-1', pageNumber: 1, regions: [{ x: 0.9, y: 0, width: 0.5, height: 0.5 }], questionText: '题目', score: 10 }],
@@ -151,6 +153,17 @@ describe('外部试卷校对与发布', () => {
         expect(emptyText.status).toBe(400);
         expect(badRegion.status).toBe(400);
         expect(mocks.transaction).not.toHaveBeenCalled();
+    });
+
+    it('事务开始前试卷若已被另一请求发布，不允许旧草稿覆盖 ready 状态', async () => {
+        mocks.tx.examPaper.updateMany.mockResolvedValueOnce({ count: 0 });
+
+        const response = await PATCH(request(draft()), params);
+
+        expect(response.status).toBe(409);
+        expect(mocks.tx.examPaperPage.update).not.toHaveBeenCalled();
+        expect(mocks.tx.examQuestion.deleteMany).not.toHaveBeenCalled();
+        expect(mocks.tx.examPaper.update).not.toHaveBeenCalled();
     });
 
     it('发布时推导或校验总分并只把试卷转为 ready', async () => {

@@ -52,16 +52,23 @@ const updateGroupByTypeSchema = z.object({
  * 试卷详情，含每题内容、来源短 ID 与历次录入的结果
  */
 export const GET = withUser(async (
-    _req: Request,
+    req: Request,
     { user, params }: AuthenticatedContext & { params: Promise<{ id: string }> }
 ) => {
     const { id } = await params;
 
     try {
+        const ownedPaper = await prisma.examPaper.findUnique({
+            where: { id },
+            select: { userId: true },
+        });
+        if (!ownedPaper || ownedPaper.userId !== user.id) {
+            return notFound("Exam paper not found");
+        }
+
         const paper = await prisma.examPaper.findUnique({
             where: { id },
             include: {
-                pages: { orderBy: { order: 'asc' } },
                 questions: {
                     orderBy: { order: 'asc' },
                     include: {
@@ -71,19 +78,24 @@ export const GET = withUser(async (
                 },
             },
         });
-        if (!paper || paper.userId !== user.id) {
+        if (!paper) {
             return notFound("Exam paper not found");
         }
+
+        const includePages = new URL(req.url).searchParams.get('includePages') === '1';
+        const pages = includePages
+            ? await prisma.examPaperPage.findMany({ where: { paperId: id }, orderBy: { order: 'asc' } })
+            : undefined;
 
         // 服务重启会中断后台生成，查看时自动续上
         if (paper.status === 'generating' && !isPaperGenerating(paper.id)) {
             void generateExamPaper(paper.id);
         }
 
-        const { userId: _userId, questions, pages, ...rest } = paper;
+        const { userId: _userId, questions, ...rest } = paper;
         return NextResponse.json({
             ...rest,
-            pages: [...(pages ?? [])].sort((a, b) => a.order - b.order),
+            ...(pages ? { pages } : {}),
             questions: questions.map(({ errorItem, practiceRecords, ...question }) => ({
                 ...question,
                 figureScale: normalizeFigureScale(question.figureScale),
@@ -128,6 +140,7 @@ export const PATCH = withUser(async (
                     userId: true,
                     origin: true,
                     status: true,
+                    updatedAt: true,
                     subjectId: true,
                     pages: { select: { id: true, order: true, role: true } },
                     questions: { select: { id: true, pageNumber: true } },
@@ -175,6 +188,18 @@ export const PATCH = withUser(async (
                 : input.totalScore ?? null;
 
             const updated = await prisma.$transaction(async (tx) => {
+                const lock = await tx.examPaper.updateMany({
+                    where: {
+                        id,
+                        userId: user.id,
+                        origin: 'imported',
+                        status: { not: 'ready' },
+                        updatedAt: paper.updatedAt,
+                    },
+                    data: { updatedAt: new Date() },
+                });
+                if (lock.count === 0) return null;
+
                 // 先移到临时页序，避免交换页序/角色时触发 SQLite 联合唯一索引。
                 for (const page of paper.pages) {
                     await tx.examPaperPage.update({ where: { id: page.id }, data: { order: page.order + 1000 } });
@@ -240,6 +265,7 @@ export const PATCH = withUser(async (
                     select: { id: true, status: true, totalScore: true },
                 });
             });
+            if (!updated) return conflict('IMPORTED_EXAM_CHANGED');
             return NextResponse.json(updated);
         }
 

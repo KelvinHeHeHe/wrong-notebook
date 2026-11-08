@@ -80,6 +80,23 @@ describe('外部试卷导入 schema', () => {
 
         expect(parsed.success).toBe(true);
     });
+
+    it('保存草稿允许题干和区域暂时为空，发布校验仍会拒绝不完整题目', () => {
+        const parsed = updateImportedExamSchema.safeParse({
+            kind: 'import-draft',
+            title: '未完成草稿',
+            pages: [{ id: 'page-1', order: 1, role: 'questions' }],
+            questions: [{ pageNumber: 1, regions: [], questionText: '' }],
+            publish: false,
+        });
+
+        expect(parsed.success).toBe(true);
+        expect(validateImportedExamForPublish({
+            pages: [{ order: 1, role: 'questions' }],
+            questions: [{ pageNumber: 1, regions: [], questionText: '' }],
+            totalScore: null,
+        })).toEqual({ ok: false, errors: ['QUESTION_TEXT_REQUIRED', 'QUESTION_REGION_REQUIRED'] });
+    });
 });
 
 describe('外部试卷导入领域函数', () => {

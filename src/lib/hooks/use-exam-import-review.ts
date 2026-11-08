@@ -9,7 +9,7 @@ import { parseExamRegions } from '@/lib/exam/exam-import';
 import { examDateToISOString } from '@/lib/exam/exam-import-client';
 import { getApiErrorMessage } from '@/lib/error-message';
 import type { Translations } from '@/lib/translations';
-import type { ExamPaperDetail } from '@/types/api';
+import type { ExamPaperDetail, Notebook } from '@/types/api';
 
 function questionToForm(question: ExamPaperDetail['questions'][number]): ImportedQuestionFormValue {
     return {
@@ -35,8 +35,10 @@ interface UseExamImportReviewOptions {
 export function useExamImportReview({ paperId, language, text }: UseExamImportReviewOptions) {
     const router = useRouter();
     const [paper, setPaper] = useState<ExamPaperDetail | null>(null);
+    const [notebooks, setNotebooks] = useState<Notebook[]>([]);
     const [questions, setQuestions] = useState<ImportedQuestionFormValue[]>([]);
     const [title, setTitle] = useState('');
+    const [subjectId, setSubjectId] = useState('');
     const [gradeSemester, setGradeSemester] = useState('');
     const [examType, setExamType] = useState('');
     const [examDate, setExamDate] = useState('');
@@ -47,11 +49,16 @@ export function useExamImportReview({ paperId, language, text }: UseExamImportRe
 
     const load = useCallback(async () => {
         try {
-            const loaded = await apiClient.get<ExamPaperDetail>(`/api/exams/${paperId}`);
+            const [loaded, loadedNotebooks] = await Promise.all([
+                apiClient.get<ExamPaperDetail>(`/api/exams/${paperId}?includePages=1`),
+                apiClient.get<Notebook[]>('/api/notebooks'),
+            ]);
             if (loaded.origin !== 'imported' || !loaded.pages) throw new Error('INVALID_IMPORTED_EXAM');
             setPaper(loaded);
+            setNotebooks(loadedNotebooks);
             setQuestions(loaded.questions.map(questionToForm));
             setTitle(loaded.title);
+            setSubjectId(loaded.subjectId ?? '');
             setGradeSemester(loaded.gradeSemester ?? '');
             setExamType(loaded.examType ?? '');
             setExamDate(loaded.examDate?.slice(0, 10) ?? '');
@@ -118,9 +125,15 @@ export function useExamImportReview({ paperId, language, text }: UseExamImportRe
         setBusy(`retry-${pageOrder}`);
         setError(null);
         try {
-            await apiClient.post(`/api/exams/${paperId}/recognize`, {
+            const result = await apiClient.post<{
+                failures: Array<{ pageOrder: number; error: string }>;
+            }>(`/api/exams/${paperId}/recognize`, {
                 pageOrders: [pageOrder], language,
             }, { recoverable: true, timeout: 600_000 });
+            if (result.failures.some((failure) => failure.pageOrder === pageOrder)) {
+                setError(text.retryFailed);
+                return;
+            }
             await load();
         } catch (cause) {
             setError(getApiErrorMessage(cause) ?? text.retryFailed);
@@ -130,7 +143,7 @@ export function useExamImportReview({ paperId, language, text }: UseExamImportRe
     };
 
     const save = async (publish: boolean) => {
-        if (!paper || !title.trim() || questions.some((question) => !question.questionText.trim() || question.regions.length === 0)) {
+        if (!paper || !title.trim() || !subjectId || (publish && questions.some((question) => !question.questionText.trim() || question.regions.length === 0))) {
             setError(text.validationFailed);
             return;
         }
@@ -139,7 +152,7 @@ export function useExamImportReview({ paperId, language, text }: UseExamImportRe
         setNotice(null);
         try {
             await apiClient.patch(`/api/exams/${paperId}`, {
-                kind: 'import-draft', title: title.trim(), subjectId: paper.subjectId ?? undefined,
+                kind: 'import-draft', title: title.trim(), subjectId,
                 gradeSemester: gradeSemester.trim() || null, examType: examType || null,
                 examDate: examDateToISOString(examDate),
                 totalScore: totalScore ? Number(totalScore) : null,
@@ -170,8 +183,8 @@ export function useExamImportReview({ paperId, language, text }: UseExamImportRe
     };
 
     return {
-        paper, pages, questions, title, gradeSemester, examType, examDate, totalScore,
-        busy, error, notice, setTitle, setGradeSemester, setExamType, setExamDate, setTotalScore,
+        paper, pages, questions, notebooks, title, subjectId, gradeSemester, examType, examDate, totalScore,
+        busy, error, notice, setTitle, setSubjectId, setGradeSemester, setExamType, setExamDate, setTotalScore,
         setPageRole, updateQuestion, moveQuestion, addQuestion,
         deleteQuestion: (key: string) => setQuestions((current) => current.filter((question) => question.key !== key)),
         retryPage, save,

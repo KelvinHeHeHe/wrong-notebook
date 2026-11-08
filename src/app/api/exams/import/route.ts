@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { conflict, internalError, validationError } from '@/lib/api-errors';
 import { withUser } from '@/lib/api-handler';
 import type { AuthenticatedContext } from '@/lib/api-handler';
-import { checksumExamPage } from '@/lib/exam/exam-import';
+import { ExamPageImageError, validateExamPageImages } from '@/lib/exam/exam-page-image';
 import { createLogger } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import { createImportedExamSchema } from '@/lib/schemas/exam';
@@ -23,10 +23,13 @@ export const POST = withUser(async (req: Request, { user }: AuthenticatedContext
         });
         if (!subject) return validationError('Invalid subject');
 
-        const pages = await Promise.all(input.pages.map(async (page) => ({
-            ...page,
-            checksum: await checksumExamPage(page.imageData),
-        })));
+        let pages;
+        try {
+            pages = await validateExamPageImages(input.pages);
+        } catch (error) {
+            if (error instanceof ExamPageImageError) return validationError(error.code);
+            throw error;
+        }
         if (new Set(pages.map((page) => page.checksum)).size !== pages.length) {
             return conflict('EXAM_PAGE_DUPLICATE');
         }
