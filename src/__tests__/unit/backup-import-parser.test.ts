@@ -263,6 +263,24 @@ describe("normalizeBackupForImport", () => {
         expect(result.examAttemptAnswers).toEqual([]);
     });
 
+    it.each([
+        { version: 13, field: { recognitionResult: '{"answers":[{"answer":"三"}]}' }, expected: '{"answers":[{"answer":"三"}]}' },
+        { version: 13, field: { recognitionResult: null }, expected: null },
+        { version: 13, field: { recognitionResult: { answers: [] } }, expected: null },
+        { version: 12, field: {}, expected: null },
+    ])("v$version 作答页识别结果规范化为 $expected", ({ version, field, expected }) => {
+        const data = asImportable(buildMinimal(version, {
+            examAttemptPages: [{
+                id: "page-1", attemptId: "attempt-1", order: 1,
+                imageData: "data:image/png;base64,AA==", mimeType: "image/png",
+                width: null, height: null, checksum: "sum",
+                createdAt: "2026-11-08T00:00:00.000Z", updatedAt: "2026-11-08T00:00:00.000Z",
+                ...field,
+            }],
+        }));
+        expect(normalizeBackupForImport(data, true).examAttemptPages[0]).toMatchObject({ recognitionResult: expected });
+    });
+
     it("v12 页面、作答和评分的非法值回退为安全默认值", () => {
         const data = asImportable(buildMinimal(12, {
             examPaperPages: [{

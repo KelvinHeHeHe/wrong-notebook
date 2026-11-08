@@ -185,9 +185,9 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(await database.knowledgeTag.count({ where: { name: '我的句式笔记' } })).toBe(1);
     });
 
-    it('导出文件使用第 12 版格式，包含 tagSet 字段、空的新考试集合与 extensions', async () => {
+    it('导出文件使用第 13 版格式，包含 tagSet 字段、空的新考试集合与 extensions', async () => {
         const backup = await exportBackup();
-        expect(backup.version).toBe(12);
+        expect(backup.version).toBe(13);
         expect(backup.extensions).toEqual({});
         expect(backup.examPaperPages).toEqual([]);
         expect(backup.examAttempts).toEqual([]);
@@ -215,7 +215,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         );
     });
 
-    it('v12 导出外部试卷元数据、页图、作答页与逐题评分', async () => {
+    it('v13 导出外部试卷元数据、页图、作答页与逐题评分', async () => {
         await database.examPaper.create({
             data: {
                 id: 'paper-imported', userId: 'user-1', title: '三年级数学单元测验', status: 'ready',
@@ -266,6 +266,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         })]);
         expect(backup.examAttemptPages).toEqual([expect.objectContaining({
             id: 'attempt-page-1', attemptId: 'attempt-1', checksum: 'attempt-checksum',
+            recognitionResult: null,
         })]);
         expect(backup.examAttemptAnswers).toEqual([expect.objectContaining({
             id: 'attempt-answer-1', attemptId: 'attempt-1', examQuestionId: 'question-imported',
@@ -299,7 +300,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(backup.examAttemptAnswers.some((answer: { id: string }) => answer.id === 'cross-owner-answer')).toBe(false);
     });
 
-    it('v12 外部试卷与确认作答完整往返，重复导入不重复新实体或关联练习记录', async () => {
+    it.each([13, 12])('v%i 外部试卷作答页识别结果往返，重复导入不重复新实体或关联练习记录', async (version) => {
         await database.examPaper.create({
             data: {
                 id: 'paper-roundtrip', userId: 'user-1', title: '备份往返单元测验', status: 'ready',
@@ -339,6 +340,11 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         });
 
         const backup = await exportBackup();
+        backup.examAttemptPages[0].recognitionResult = '{"answers":[{"externalNumber":"1","answer":"六","confidence":0.88}],"pageNumber":1}';
+        if (version === 12) {
+            backup.version = 12;
+            delete backup.examAttemptPages[0].recognitionResult;
+        }
         await clearUserData();
         const first = await importBackup(backup);
         expect(first.stats).toMatchObject({
@@ -365,7 +371,13 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         })]);
         expect(restored.attempts).toHaveLength(1);
         expect(restored.attempts[0]).toMatchObject({ status: 'confirmed', totalScore: 0, maxScore: 10, comment: '错一题' });
-        expect(restored.attempts[0].pages).toEqual([expect.objectContaining({ checksum: 'attempt-roundtrip-sum' })]);
+        const expectedRecognitionResult = version === 12 ? null : '{"answers":[{"externalNumber":"1","answer":"六","confidence":0.88}],"pageNumber":1}';
+        expect(restored.attempts[0].pages).toEqual([expect.objectContaining({
+            checksum: 'attempt-roundtrip-sum', recognitionResult: expectedRecognitionResult,
+        })]);
+        const reexported = await exportBackup();
+        expect(reexported.version).toBe(13);
+        expect(reexported.examAttemptPages[0].recognitionResult).toBe(expectedRecognitionResult);
         expect(restored.attempts[0].answers).toEqual([expect.objectContaining({
             examQuestionId: restored.questions[0].id, result: 'wrong', awardedScore: 0, reviewStatus: 'reviewed',
         })]);

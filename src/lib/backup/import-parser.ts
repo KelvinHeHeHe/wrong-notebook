@@ -182,6 +182,7 @@ export interface NormalizedExamAttemptPage {
     width: number | null;
     height: number | null;
     checksum: string | null;
+    recognitionResult: string | null;
     createdAt: Date | undefined;
     updatedAt: Date | undefined;
 }
@@ -335,6 +336,7 @@ function normalizeExamAttemptPage(page: ImportedBackupExamAttemptPage): Normaliz
         width: safePositiveInteger(page.width),
         height: safePositiveInteger(page.height),
         checksum: safeNullableString(page.checksum),
+        recognitionResult: safeNullableString(page.recognitionResult),
         createdAt: safeParseDate(page.createdAt),
         updatedAt: safeParseDate(page.updatedAt),
     };

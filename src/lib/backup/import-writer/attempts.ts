@@ -115,6 +115,7 @@ export async function importExamAttemptDetails(ctx: ImportContext): Promise<void
                 width: page.width,
                 height: page.height,
                 checksum: page.checksum,
+                recognitionResult: page.recognitionResult,
                 createdAt: page.createdAt,
                 updatedAt: page.updatedAt,
             },

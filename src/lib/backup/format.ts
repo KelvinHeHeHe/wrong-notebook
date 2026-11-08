@@ -11,7 +11,7 @@ import { z } from "zod";
  */
 
 /** 当前备份文件版本号 */
-export const BACKUP_VERSION = 12;
+export const BACKUP_VERSION = 13;
 
 /** 备份文件中的用户对象 */
 export interface BackupUser {
@@ -265,6 +265,8 @@ export interface BackupExamAttemptPage {
     width: number | null;
     height: number | null;
     checksum: string;
+    /** version 13 起导出 */
+    recognitionResult: string | null;
     createdAt: string | Date;
     updatedAt: string | Date;
 }
@@ -396,7 +398,9 @@ export type ImportedBackupExamAttempt = Omit<BackupExamAttempt, "takenAt" | "con
 };
 
 /** 导入侧的纸质作答页面 */
-export type ImportedBackupExamAttemptPage = Omit<BackupExamAttemptPage, "createdAt" | "updatedAt"> & {
+export type ImportedBackupExamAttemptPage = Omit<BackupExamAttemptPage, "recognitionResult" | "createdAt" | "updatedAt"> & {
+    /** v12 缺失时规范化为 null */
+    recognitionResult?: string | null;
     createdAt: ImportedDate;
     updatedAt: ImportedDate;
 };

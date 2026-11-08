@@ -345,17 +345,18 @@ model ExamAttempt {
 
 // 纸质作答回传的本地页面
 model ExamAttemptPage {
-  id        String      @id @default(cuid())
-  attemptId String
-  attempt   ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  order     Int
-  imageData String
-  mimeType  String
-  width     Int?
-  height    Int?
-  checksum  String
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  id                String      @id @default(cuid())
+  attemptId         String
+  attempt           ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  order             Int
+  imageData         String
+  mimeType          String
+  width             Int?
+  height            Int?
+  checksum          String
+  recognitionResult String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
   @@unique([attemptId, order])
 }

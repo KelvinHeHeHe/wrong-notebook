@@ -2,8 +2,21 @@ import { describe, expect, it } from "vitest";
 import { BACKUP_VERSION, parseBackupFile } from "@/lib/backup/format";
 
 describe("parseBackupFile", () => {
-    it("当前备份版本为 12", () => {
-        expect(BACKUP_VERSION).toBe(12);
+    it("当前备份版本为 13", () => {
+        expect(BACKUP_VERSION).toBe(13);
+    });
+
+    it.each([
+        { version: 13, page: { recognitionResult: '{"answers":[{"answer":"三"}]}' } },
+        { version: 13, page: { recognitionResult: null } },
+        { version: 12, page: {} },
+    ])("接受 v$version 作答页并保留识别结果字段", ({ version, page }) => {
+        const result = parseBackupFile({
+            version, user: { id: "u1", email: "a@example.com" }, errorItems: [],
+            examAttemptPages: [{ id: "page-1", ...page }],
+        });
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.data.examAttemptPages).toEqual([{ id: "page-1", ...page }]);
     });
 
     it("接受合法的最小 v1 备份文件", () => {

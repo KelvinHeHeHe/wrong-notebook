@@ -159,6 +159,8 @@ describe('真实 Prisma 数据库迁移', () => {
             ]));
         expect(database!.prepare('PRAGMA table_info("PracticeRecord")').all())
             .toContainEqual(expect.objectContaining({ name: 'examAttemptId', notnull: 0, dflt_value: null }));
+        expect(database!.prepare('PRAGMA table_info("ExamAttemptPage")').all())
+            .toContainEqual(expect.objectContaining({ name: 'recognitionResult', type: 'TEXT', notnull: 0, dflt_value: null }));
         expect(['ExamPaperPage', 'ExamAttempt', 'ExamAttemptPage', 'ExamAttemptAnswer'].map((table) =>
             database!.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table),
         )).toEqual([
@@ -172,6 +174,28 @@ describe('真实 Prisma 数据库迁移', () => {
         expect(() => execFileSync(process.execPath, [resolve('node_modules/prisma/build/index.js'), 'migrate', 'diff',
             '--from-url', 'file:' + databasePath, '--to-schema-datamodel', schemaPath, '--exit-code'], { stdio: 'pipe' })).not.toThrow();
         expect(deploy()).toContain('No pending migrations');
+    }, 120000);
+
+    it('纸质作答页升级后保留旧行并将识别结果初始化为 null', () => {
+        deploy(migrations.filter((name) => name < '20261108160000_add_attempt_page_recognition'));
+        openDatabase();
+        database!.exec(`
+            INSERT INTO "User" (id, email, password, updatedAt)
+                VALUES ('user-1', 'page-migration@example.com', 'test-only', '2026-11-08');
+            INSERT INTO "ExamPaper" (id, userId, title, scope, difficulty, requestedCount, subjectIds, updatedAt)
+                VALUES ('exam', 'user-1', '迁移前纸质试卷', 'all', 'medium', 1, '[]', '2026-11-08');
+            INSERT INTO "ExamAttempt" (id, userId, paperId, takenAt, updatedAt)
+                VALUES ('attempt', 'user-1', 'exam', '2026-11-08', '2026-11-08');
+            INSERT INTO "ExamAttemptPage" (id, attemptId, "order", imageData, mimeType, width, height, checksum, updatedAt)
+                VALUES ('page', 'attempt', 1, 'data:image/png;base64,AA==', 'image/png', 1200, 1600, 'legacy-sum', '2026-11-08');
+        `);
+        const before = rows('ExamAttemptPage');
+        closeDatabase();
+
+        deploy();
+        openDatabase();
+        expect(rows('ExamAttemptPage')).toEqual(before.map((page) => ({ ...page, recognitionResult: null })));
+        expectConstraints();
     }, 120000);
 
     it.each([false, true])('旧库升级保留全部数据与关联（已应用配图比例迁移：%s）', (hasScale) => {
