@@ -60,9 +60,9 @@ export async function startMockAI() {
                     const chunks = [];
                     for await (const chunk of request) chunks.push(chunk);
                     const patch = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-                    const state = cases.get(id) || { id, calls: [], inflight: 0, held: [], partial: false, gradeError: false, hold: false, masteryProbability: 30, failNext: 0, distinctAnalysis: false };
+                    const state = cases.get(id) || { id, calls: [], inflight: 0, held: [], partial: false, gradeError: false, hold: false, masteryProbability: 30, failNext: 0, splitFailNext: 0, distinctAnalysis: false };
                     // 控制接口只更新声明的标量字段，保持内部集合及对象原型不受请求体影响。
-                    const allowed = new Set(['partial', 'gradeError', 'hold', 'masteryProbability', 'title', 'retry', 'failNext', 'distinctAnalysis']);
+                    const allowed = new Set(['partial', 'gradeError', 'hold', 'masteryProbability', 'title', 'retry', 'failNext', 'splitFailNext', 'distinctAnalysis']);
                     if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).some((key) => !allowed.has(key))) {
                         return json(response, 400, { error: '不支持的场景控制字段' });
                     }
@@ -70,7 +70,8 @@ export async function startMockAI() {
                         (patch.masteryProbability !== undefined && (!Number.isFinite(patch.masteryProbability) || patch.masteryProbability < 0 || patch.masteryProbability > 100)) ||
                         (patch.title !== undefined && (typeof patch.title !== 'string' || patch.title.length > 500)) ||
                         (patch.retry !== undefined && (!Number.isInteger(patch.retry) || patch.retry < 0)) ||
-                        (patch.failNext !== undefined && (!Number.isInteger(patch.failNext) || patch.failNext < 0 || patch.failNext > 100))) {
+                        (patch.failNext !== undefined && (!Number.isInteger(patch.failNext) || patch.failNext < 0 || patch.failNext > 100)) ||
+                        (patch.splitFailNext !== undefined && (!Number.isInteger(patch.splitFailNext) || patch.splitFailNext < 0 || patch.splitFailNext > 100))) {
                         return json(response, 400, { error: '场景控制字段类型无效' });
                     }
                     if (patch.partial !== undefined) state.partial = patch.partial;
@@ -80,6 +81,7 @@ export async function startMockAI() {
                     if (patch.title !== undefined) state.title = patch.title;
                     if (patch.retry !== undefined) state.retry = patch.retry;
                     if (patch.failNext !== undefined) state.failNext = patch.failNext;
+                    if (patch.splitFailNext !== undefined) state.splitFailNext = patch.splitFailNext;
                     if (patch.distinctAnalysis !== undefined) state.distinctAnalysis = patch.distinctAnalysis;
                     if (!state.hold) state.held.splice(0).forEach((release) => release());
                     cases.set(id, state);
@@ -116,6 +118,11 @@ export async function startMockAI() {
             state.inflight++;
             try {
                 if (state.hold && ['analysis', 'variant', 'split', 'reanswer'].includes(operation)) await new Promise((resolve) => state.held.push(resolve));
+                if (state.splitFailNext > 0 && operation === 'split') {
+                    state.splitFailNext--;
+                    call.failed = true;
+                    return json(response, 400, { error: { message: 'E2E 固定分题失败', type: 'invalid_request_error', code: 'e2e_split_failure' } });
+                }
                 // 固定上游失败：用于验证部分失败只重试失败的题
                 if (state.failNext > 0 && ['analysis', 'reanswer'].includes(operation)) {
                     state.failNext--;
