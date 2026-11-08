@@ -273,6 +273,32 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         })]);
     });
 
+    it('用户备份不导出归属其他用户试卷的异常作答关联', async () => {
+        await database.user.create({ data: { id: 'user-2', email: 'other@example.com', password: 'test-only' } });
+        await database.examPaper.create({
+            data: {
+                id: 'other-paper', userId: 'user-2', title: '其他用户试卷', status: 'ready', scope: 'all', difficulty: 'original',
+                mode: 'original', requestedCount: 1, subjectIds: '[]',
+                questions: { create: [{ id: 'other-question', order: 0, sourceShortId: 'OTHER1', status: 'ready' }] },
+            },
+        });
+        await database.examAttempt.create({
+            data: {
+                id: 'cross-owner-attempt', userId: 'user-1', paperId: 'other-paper', status: 'review', takenAt: new Date('2026-11-02T00:00:00Z'),
+                pages: { create: [{
+                    id: 'cross-owner-page', order: 1, imageData: 'data:image/png;base64,Y3Jvc3M=', mimeType: 'image/png', checksum: 'cross-owner',
+                }] },
+                answers: { create: [{ id: 'cross-owner-answer', examQuestionId: 'other-question', reviewStatus: 'pending' }] },
+            },
+        });
+
+        const backup = await exportBackup();
+        expect(backup.examPapers.some((paper: { id: string }) => paper.id === 'other-paper')).toBe(false);
+        expect(backup.examAttempts.some((attempt: { id: string }) => attempt.id === 'cross-owner-attempt')).toBe(false);
+        expect(backup.examAttemptPages.some((page: { id: string }) => page.id === 'cross-owner-page')).toBe(false);
+        expect(backup.examAttemptAnswers.some((answer: { id: string }) => answer.id === 'cross-owner-answer')).toBe(false);
+    });
+
     it('v12 外部试卷与确认作答完整往返，重复导入不重复新实体或关联练习记录', async () => {
         await database.examPaper.create({
             data: {

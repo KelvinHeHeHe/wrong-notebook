@@ -309,13 +309,16 @@ function normalizeExamPaperPage(page: ImportedBackupExamPaperPage): NormalizedEx
 }
 
 function normalizeExamAttempt(attempt: ImportedBackupExamAttempt): NormalizedExamAttempt {
+    const maxScore = safeNonNegativeNumber(attempt.maxScore);
+    const rawTotalScore = safeNonNegativeNumber(attempt.totalScore);
+    const totalScore = rawTotalScore !== null && maxScore !== null && rawTotalScore > maxScore ? null : rawTotalScore;
     return {
         raw: attempt,
         status: (EXAM_ATTEMPT_STATUSES as readonly string[]).includes(attempt.status)
             ? attempt.status as NormalizedExamAttempt['status'] : 'uploaded',
         takenAt: safeParseDate(attempt.takenAt),
-        totalScore: safeNonNegativeNumber(attempt.totalScore),
-        maxScore: safeNonNegativeNumber(attempt.maxScore),
+        totalScore,
+        maxScore,
         comment: safeNullableString(attempt.comment),
         confirmedAt: safeParseDate(attempt.confirmedAt),
         createdAt: safeParseDate(attempt.createdAt),
@@ -338,12 +341,15 @@ function normalizeExamAttemptPage(page: ImportedBackupExamAttemptPage): Normaliz
 }
 
 function normalizeExamAttemptAnswer(answer: ImportedBackupExamAttemptAnswer): NormalizedExamAttemptAnswer {
+    const maxScore = safeNonNegativeNumber(answer.maxScore);
+    const rawAwardedScore = safeNonNegativeNumber(answer.awardedScore);
+    const awardedScore = rawAwardedScore !== null && maxScore !== null && rawAwardedScore > maxScore ? null : rawAwardedScore;
     return {
         raw: answer,
         recognizedAnswer: safeNullableString(answer.recognizedAnswer),
         result: isPracticeResult(answer.result) ? answer.result : null,
-        awardedScore: safeNonNegativeNumber(answer.awardedScore),
-        maxScore: safeNonNegativeNumber(answer.maxScore),
+        awardedScore,
+        maxScore,
         gradingSource: (EXAM_GRADING_SOURCES as readonly string[]).includes(answer.gradingSource || '')
             ? answer.gradingSource as 'ai' | 'manual' : null,
         gradingReason: safeNullableString(answer.gradingReason),

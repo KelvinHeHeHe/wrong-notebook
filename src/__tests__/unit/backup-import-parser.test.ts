@@ -273,7 +273,7 @@ describe("normalizeBackupForImport", () => {
             }],
             examAttempts: [{
                 id: "attempt-1", userId: "u1", paperId: "paper-1", status: "bad",
-                takenAt: "bad-date", totalScore: -1, maxScore: Number.POSITIVE_INFINITY,
+                takenAt: "bad-date", totalScore: 101, maxScore: 100,
                 comment: 123, confirmedAt: "bad-date", createdAt: "bad-date", updatedAt: "bad-date",
             }],
             examAttemptPages: [{
@@ -284,7 +284,7 @@ describe("normalizeBackupForImport", () => {
             }],
             examAttemptAnswers: [{
                 id: "answer-1", attemptId: "attempt-1", examQuestionId: "q1",
-                recognizedAnswer: 42, result: "bad", awardedScore: -1, maxScore: Number.NaN,
+                recognizedAnswer: 42, result: "bad", awardedScore: 6, maxScore: 5,
                 gradingSource: "robot", gradingReason: 5, confidence: 2,
                 reviewStatus: "bad", regionJson: 9,
                 createdAt: "bad-date", updatedAt: "bad-date",
@@ -297,7 +297,7 @@ describe("normalizeBackupForImport", () => {
             createdAt: undefined, updatedAt: undefined,
         });
         expect(result.examAttempts[0]).toMatchObject({
-            status: "uploaded", takenAt: undefined, totalScore: null, maxScore: null,
+            status: "uploaded", takenAt: undefined, totalScore: null, maxScore: 100,
             comment: null, confirmedAt: undefined,
         });
         expect(result.examAttemptPages[0]).toMatchObject({
@@ -305,7 +305,7 @@ describe("normalizeBackupForImport", () => {
             createdAt: undefined, updatedAt: undefined,
         });
         expect(result.examAttemptAnswers[0]).toMatchObject({
-            recognizedAnswer: null, result: null, awardedScore: null, maxScore: null,
+            recognizedAnswer: null, result: null, awardedScore: null, maxScore: 5,
             gradingSource: null, gradingReason: null, confidence: null,
             reviewStatus: "pending", regionJson: null,
             createdAt: undefined, updatedAt: undefined,

@@ -92,7 +92,8 @@ export async function GET(req: Request) {
         });
 
         const examAttempts = await prisma.examAttempt.findMany({
-            where: userFilter,
+            // 同时校验作答和试卷归属，避免异常跨用户关联进入单用户备份。
+            where: { ...userFilter, paperId: { in: examPapers.map((paper) => paper.id) } },
             orderBy: [{ takenAt: 'asc' }, { id: 'asc' }],
         });
         const examAttemptIds = examAttempts.map((attempt) => attempt.id);
