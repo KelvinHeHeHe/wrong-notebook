@@ -236,6 +236,82 @@ describe("normalizeBackupForImport", () => {
         expect(paper.statuses).toEqual(["ready"]);
     });
 
+    it("v11 试卷缺少考试元数据与新集合时使用兼容默认值", () => {
+        const data = asImportable(buildMinimal(11, {
+            examPapers: [{
+                id: "p1", userId: "u1", title: "旧试卷", status: "ready",
+                scope: "all", difficulty: "medium", requestedCount: 1,
+                subjectIds: "[]", tagNames: null, resultsRecordedAt: null,
+                createdAt: "2024-01-01T00:00:00.000Z", updatedAt: "2024-01-01T00:00:00.000Z",
+                questions: [{ id: "q1", order: 0, errorItemId: null, sourceShortId: "", status: "ready" }],
+            }],
+        }));
+
+        const result = normalizeBackupForImport(data, true);
+        expect(result.examPapers[0]).toMatchObject({
+            origin: "generated",
+            subjectId: null,
+            gradeSemester: null,
+            examType: null,
+            examDate: undefined,
+            totalScore: null,
+            sourceFileName: null,
+        });
+        expect(result.examPaperPages).toEqual([]);
+        expect(result.examAttempts).toEqual([]);
+        expect(result.examAttemptPages).toEqual([]);
+        expect(result.examAttemptAnswers).toEqual([]);
+    });
+
+    it("v12 页面、作答和评分的非法值回退为安全默认值", () => {
+        const data = asImportable(buildMinimal(12, {
+            examPaperPages: [{
+                id: "page-1", paperId: "paper-1", order: -1, role: "bad",
+                imageData: "data:image/png;base64,AA==", mimeType: "image/png",
+                width: 0, height: 10.5, checksum: "sum",
+                createdAt: "bad-date", updatedAt: "bad-date",
+            }],
+            examAttempts: [{
+                id: "attempt-1", userId: "u1", paperId: "paper-1", status: "bad",
+                takenAt: "bad-date", totalScore: -1, maxScore: Number.POSITIVE_INFINITY,
+                comment: 123, confirmedAt: "bad-date", createdAt: "bad-date", updatedAt: "bad-date",
+            }],
+            examAttemptPages: [{
+                id: "return-page-1", attemptId: "attempt-1", order: -3,
+                imageData: "data:image/jpeg;base64,AA==", mimeType: "image/jpeg",
+                width: -10, height: 20, checksum: "return-sum",
+                createdAt: "bad-date", updatedAt: "bad-date",
+            }],
+            examAttemptAnswers: [{
+                id: "answer-1", attemptId: "attempt-1", examQuestionId: "q1",
+                recognizedAnswer: 42, result: "bad", awardedScore: -1, maxScore: Number.NaN,
+                gradingSource: "robot", gradingReason: 5, confidence: 2,
+                reviewStatus: "bad", regionJson: 9,
+                createdAt: "bad-date", updatedAt: "bad-date",
+            }],
+        }));
+
+        const result = normalizeBackupForImport(data, true);
+        expect(result.examPaperPages[0]).toMatchObject({
+            order: 0, role: "questions", width: null, height: null,
+            createdAt: undefined, updatedAt: undefined,
+        });
+        expect(result.examAttempts[0]).toMatchObject({
+            status: "uploaded", takenAt: undefined, totalScore: null, maxScore: null,
+            comment: null, confirmedAt: undefined,
+        });
+        expect(result.examAttemptPages[0]).toMatchObject({
+            order: 0, width: null, height: 20,
+            createdAt: undefined, updatedAt: undefined,
+        });
+        expect(result.examAttemptAnswers[0]).toMatchObject({
+            recognizedAnswer: null, result: null, awardedScore: null, maxScore: null,
+            gradingSource: null, gradingReason: null, confidence: null,
+            reviewStatus: "pending", regionJson: null,
+            createdAt: undefined, updatedAt: undefined,
+        });
+    });
+
     it("练习记录：source 缺省为 practice，非法 result 忽略", () => {
         const data = asImportable(buildMinimal(BACKUP_VERSION, {
             practiceRecords: [{

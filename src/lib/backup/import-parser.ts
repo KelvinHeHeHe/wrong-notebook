@@ -7,8 +7,12 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import type {
     ImportableBackupFile,
+    ImportedBackupExamAttempt,
+    ImportedBackupExamAttemptAnswer,
+    ImportedBackupExamAttemptPage,
     ImportedBackupErrorItem,
     ImportedBackupExamPaper,
+    ImportedBackupExamPaperPage,
     ImportedBackupPracticeRecord,
     ImportedBackupReviewSchedule,
 } from "@/lib/backup/format";
@@ -27,6 +31,12 @@ import { EXAM_DIFFICULTIES, EXAM_MODES, EXAM_SCOPES } from "@/lib/exam/exam";
 import { isPracticeResult } from "@/lib/mastery";
 
 export type ImportData = ImportableBackupFile;
+
+const EXAM_ORIGINS = ['generated', 'imported'] as const;
+const EXAM_PAGE_ROLES = ['questions', 'answer_key'] as const;
+const EXAM_ATTEMPT_STATUSES = ['uploaded', 'recognizing', 'review', 'confirmed', 'failed'] as const;
+const EXAM_GRADING_SOURCES = ['ai', 'manual'] as const;
+const EXAM_REVIEW_STATUSES = ['pending', 'required', 'reviewed'] as const;
 
 // 与用户设置接口的取值范围一致，单项不合法时只跳过该项
 const PREFERENCE_SCHEMAS = {
@@ -50,6 +60,22 @@ export function safeParseDate(dateStr: string | undefined | null): Date | undefi
 /** 掌握概率须在 [0, 1] 内，否则视为未评估 */
 export function safeMasteryProbability(val: unknown): number | null {
     return typeof val === 'number' && Number.isFinite(val) && val >= 0 && val <= 1 ? val : null;
+}
+
+function safeNullableString(value: unknown): string | null {
+    return typeof value === 'string' ? value : null;
+}
+
+function safeNonNegativeNumber(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function safePositiveInteger(value: unknown): number | null {
+    return Number.isInteger(value) && (value as number) > 0 ? value as number : null;
+}
+
+function safeOrder(value: unknown): number {
+    return Number.isInteger(value) && (value as number) >= 0 ? value as number : 0;
 }
 
 /** 导入后重新序列化，格式不合法的暂存内容丢弃 */
@@ -111,6 +137,69 @@ export interface NormalizedExamPaper {
     requestedCount: number;
     tagNames: string | null;
     statuses: string[];
+    origin: 'generated' | 'imported';
+    subjectId: string | null;
+    gradeSemester: string | null;
+    examType: string | null;
+    examDate: Date | undefined;
+    totalScore: number | null;
+    sourceFileName: string | null;
+}
+
+/** 规范化的外部整卷页面 */
+export interface NormalizedExamPaperPage {
+    raw: ImportedBackupExamPaperPage;
+    order: number;
+    role: 'questions' | 'answer_key';
+    imageData: string | null;
+    mimeType: string | null;
+    width: number | null;
+    height: number | null;
+    checksum: string | null;
+    createdAt: Date | undefined;
+    updatedAt: Date | undefined;
+}
+
+/** 规范化的一次纸质作答 */
+export interface NormalizedExamAttempt {
+    raw: ImportedBackupExamAttempt;
+    status: 'uploaded' | 'recognizing' | 'review' | 'confirmed' | 'failed';
+    takenAt: Date | undefined;
+    totalScore: number | null;
+    maxScore: number | null;
+    comment: string | null;
+    confirmedAt: Date | undefined;
+    createdAt: Date | undefined;
+    updatedAt: Date | undefined;
+}
+
+/** 规范化的纸质作答页面 */
+export interface NormalizedExamAttemptPage {
+    raw: ImportedBackupExamAttemptPage;
+    order: number;
+    imageData: string | null;
+    mimeType: string | null;
+    width: number | null;
+    height: number | null;
+    checksum: string | null;
+    createdAt: Date | undefined;
+    updatedAt: Date | undefined;
+}
+
+/** 规范化的逐题评分草稿 */
+export interface NormalizedExamAttemptAnswer {
+    raw: ImportedBackupExamAttemptAnswer;
+    recognizedAnswer: string | null;
+    result: 'correct' | 'wrong' | 'not_attempted' | null;
+    awardedScore: number | null;
+    maxScore: number | null;
+    gradingSource: 'ai' | 'manual' | null;
+    gradingReason: string | null;
+    confidence: number | null;
+    reviewStatus: 'pending' | 'required' | 'reviewed';
+    regionJson: string | null;
+    createdAt: Date | undefined;
+    updatedAt: Date | undefined;
 }
 
 /** 规范化的复习计划 */
@@ -141,6 +230,10 @@ export interface NormalizedImportData {
     reviewSchedules: NormalizedReviewSchedule[];
     practiceRecords: NormalizedPracticeRecord[];
     examPapers: NormalizedExamPaper[];
+    examPaperPages: NormalizedExamPaperPage[];
+    examAttempts: NormalizedExamAttempt[];
+    examAttemptPages: NormalizedExamAttemptPage[];
+    examAttemptAnswers: NormalizedExamAttemptAnswer[];
     paperGroups: NonNullable<ImportData['paperGroups']>;
 }
 
@@ -189,6 +282,77 @@ function normalizeExamPaper(paper: ImportedBackupExamPaper): NormalizedExamPaper
         tagNames: typeof paper.tagNames === 'string' ? paper.tagNames : null,
         // 导出时还在生成的题目不会继续生成，按失败处理，可在试卷页重新生成
         statuses: questions.map((question) => (question.status === 'ready' ? 'ready' : 'failed')),
+        origin: (EXAM_ORIGINS as readonly string[]).includes(paper.origin || '')
+            ? paper.origin as 'generated' | 'imported' : 'generated',
+        subjectId: safeNullableString(paper.subjectId),
+        gradeSemester: safeNullableString(paper.gradeSemester),
+        examType: safeNullableString(paper.examType),
+        examDate: safeParseDate(paper.examDate),
+        totalScore: safeNonNegativeNumber(paper.totalScore),
+        sourceFileName: safeNullableString(paper.sourceFileName),
+    };
+}
+
+function normalizeExamPaperPage(page: ImportedBackupExamPaperPage): NormalizedExamPaperPage {
+    return {
+        raw: page,
+        order: safeOrder(page.order),
+        role: (EXAM_PAGE_ROLES as readonly string[]).includes(page.role) ? page.role as 'questions' | 'answer_key' : 'questions',
+        imageData: safeNullableString(page.imageData),
+        mimeType: safeNullableString(page.mimeType),
+        width: safePositiveInteger(page.width),
+        height: safePositiveInteger(page.height),
+        checksum: safeNullableString(page.checksum),
+        createdAt: safeParseDate(page.createdAt),
+        updatedAt: safeParseDate(page.updatedAt),
+    };
+}
+
+function normalizeExamAttempt(attempt: ImportedBackupExamAttempt): NormalizedExamAttempt {
+    return {
+        raw: attempt,
+        status: (EXAM_ATTEMPT_STATUSES as readonly string[]).includes(attempt.status)
+            ? attempt.status as NormalizedExamAttempt['status'] : 'uploaded',
+        takenAt: safeParseDate(attempt.takenAt),
+        totalScore: safeNonNegativeNumber(attempt.totalScore),
+        maxScore: safeNonNegativeNumber(attempt.maxScore),
+        comment: safeNullableString(attempt.comment),
+        confirmedAt: safeParseDate(attempt.confirmedAt),
+        createdAt: safeParseDate(attempt.createdAt),
+        updatedAt: safeParseDate(attempt.updatedAt),
+    };
+}
+
+function normalizeExamAttemptPage(page: ImportedBackupExamAttemptPage): NormalizedExamAttemptPage {
+    return {
+        raw: page,
+        order: safeOrder(page.order),
+        imageData: safeNullableString(page.imageData),
+        mimeType: safeNullableString(page.mimeType),
+        width: safePositiveInteger(page.width),
+        height: safePositiveInteger(page.height),
+        checksum: safeNullableString(page.checksum),
+        createdAt: safeParseDate(page.createdAt),
+        updatedAt: safeParseDate(page.updatedAt),
+    };
+}
+
+function normalizeExamAttemptAnswer(answer: ImportedBackupExamAttemptAnswer): NormalizedExamAttemptAnswer {
+    return {
+        raw: answer,
+        recognizedAnswer: safeNullableString(answer.recognizedAnswer),
+        result: isPracticeResult(answer.result) ? answer.result : null,
+        awardedScore: safeNonNegativeNumber(answer.awardedScore),
+        maxScore: safeNonNegativeNumber(answer.maxScore),
+        gradingSource: (EXAM_GRADING_SOURCES as readonly string[]).includes(answer.gradingSource || '')
+            ? answer.gradingSource as 'ai' | 'manual' : null,
+        gradingReason: safeNullableString(answer.gradingReason),
+        confidence: safeMasteryProbability(answer.confidence),
+        reviewStatus: (EXAM_REVIEW_STATUSES as readonly string[]).includes(answer.reviewStatus)
+            ? answer.reviewStatus as NormalizedExamAttemptAnswer['reviewStatus'] : 'pending',
+        regionJson: safeNullableString(answer.regionJson),
+        createdAt: safeParseDate(answer.createdAt),
+        updatedAt: safeParseDate(answer.updatedAt),
     };
 }
 
@@ -233,6 +397,10 @@ export function normalizeBackupForImport(body: ImportData, belongsToCurrentUser:
         })),
         practiceRecords: (body.practiceRecords ?? []).map(normalizePracticeRecord),
         examPapers: (body.examPapers ?? []).map(normalizeExamPaper),
+        examPaperPages: (body.examPaperPages ?? []).map(normalizeExamPaperPage),
+        examAttempts: (body.examAttempts ?? []).map(normalizeExamAttempt),
+        examAttemptPages: (body.examAttemptPages ?? []).map(normalizeExamAttemptPage),
+        examAttemptAnswers: (body.examAttemptAnswers ?? []).map(normalizeExamAttemptAnswer),
         paperGroups: body.paperGroups ?? [],
     };
 }

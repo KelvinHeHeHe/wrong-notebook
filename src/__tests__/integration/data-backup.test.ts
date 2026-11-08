@@ -185,10 +185,14 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(await database.knowledgeTag.count({ where: { name: '我的句式笔记' } })).toBe(1);
     });
 
-    it('导出文件使用第 11 版格式，包含 tagSet 字段、空的 extensions 与试卷 mode', async () => {
+    it('导出文件使用第 12 版格式，包含 tagSet 字段、空的新考试集合与 extensions', async () => {
         const backup = await exportBackup();
-        expect(backup.version).toBe(11);
+        expect(backup.version).toBe(12);
         expect(backup.extensions).toEqual({});
+        expect(backup.examPaperPages).toEqual([]);
+        expect(backup.examAttempts).toEqual([]);
+        expect(backup.examAttemptPages).toEqual([]);
+        expect(backup.examAttemptAnswers).toEqual([]);
         expect(backup.paperGroups).toContainEqual(expect.objectContaining({ id: 'group-b', key: 'b', name: 'B卷' }));
         expect(backup.systemTags).toBeDefined();
         expect(backup.subjects).toEqual(
@@ -209,6 +213,64 @@ describe('数据导出后再导入（真实 SQLite）', () => {
                 expect.objectContaining({ id: 'tag-2', tagSet: 'cn-math-taxonomy' }),
             ])
         );
+    });
+
+    it('v12 导出外部试卷元数据、页图、作答页与逐题评分', async () => {
+        await database.examPaper.create({
+            data: {
+                id: 'paper-imported', userId: 'user-1', title: '三年级数学单元测验', status: 'ready',
+                scope: 'all', difficulty: 'original', mode: 'original', requestedCount: 1,
+                subjectIds: JSON.stringify(['math']), origin: 'imported', subjectId: 'math',
+                gradeSemester: '三年级上', examType: 'unit', examDate: new Date('2026-11-01T00:00:00Z'),
+                totalScore: 100, sourceFileName: 'unit-test.pdf',
+                questions: { create: [{
+                    id: 'question-imported', order: 0, sourceShortId: 'IMP001', status: 'ready',
+                    questionText: '1 + 2 = ?', answerText: '3', score: 5,
+                    externalNumber: '1', pageNumber: 1,
+                    regionJson: '{"x":0.1,"y":0.2,"width":0.3,"height":0.4}', recognitionConfidence: 0.97,
+                }] },
+                pages: { create: [{
+                    id: 'paper-page-1', order: 1, role: 'questions', imageData: 'data:image/png;base64,cGFnZQ==',
+                    mimeType: 'image/png', width: 1200, height: 1600, checksum: 'paper-checksum',
+                }] },
+                attempts: { create: [{
+                    id: 'attempt-1', userId: 'user-1', status: 'confirmed', takenAt: new Date('2026-11-02T00:00:00Z'),
+                    totalScore: 5, maxScore: 5, comment: '第一次作答', confirmedAt: new Date('2026-11-02T00:10:00Z'),
+                    pages: { create: [{
+                        id: 'attempt-page-1', order: 1, imageData: 'data:image/jpeg;base64,cmV0dXJu', mimeType: 'image/jpeg',
+                        width: 1000, height: 1400, checksum: 'attempt-checksum',
+                    }] },
+                    answers: { create: [{
+                        id: 'attempt-answer-1', examQuestionId: 'question-imported', recognizedAnswer: '3', result: 'correct',
+                        awardedScore: 5, maxScore: 5, gradingSource: 'manual', gradingReason: '家长确认', confidence: 0.99,
+                        reviewStatus: 'reviewed', regionJson: '{"x":0.1,"y":0.2,"width":0.3,"height":0.4}',
+                    }] },
+                }] },
+            },
+        });
+
+        const backup = await exportBackup();
+        expect(backup.examPapers).toContainEqual(expect.objectContaining({
+            id: 'paper-imported', origin: 'imported', subjectId: 'math', gradeSemester: '三年级上',
+            examType: 'unit', examDate: '2026-11-01T00:00:00.000Z', totalScore: 100, sourceFileName: 'unit-test.pdf',
+        }));
+        expect(backup.examPapers.find((paper: { id: string }) => paper.id === 'paper-imported').questions[0]).toMatchObject({
+            externalNumber: '1', pageNumber: 1, recognitionConfidence: 0.97,
+        });
+        expect(backup.examPaperPages).toEqual([expect.objectContaining({
+            id: 'paper-page-1', paperId: 'paper-imported', order: 1, role: 'questions',
+            imageData: 'data:image/png;base64,cGFnZQ==', checksum: 'paper-checksum',
+        })]);
+        expect(backup.examAttempts).toEqual([expect.objectContaining({
+            id: 'attempt-1', paperId: 'paper-imported', userId: 'user-1', status: 'confirmed', totalScore: 5, maxScore: 5,
+        })]);
+        expect(backup.examAttemptPages).toEqual([expect.objectContaining({
+            id: 'attempt-page-1', attemptId: 'attempt-1', checksum: 'attempt-checksum',
+        })]);
+        expect(backup.examAttemptAnswers).toEqual([expect.objectContaining({
+            id: 'attempt-answer-1', attemptId: 'attempt-1', examQuestionId: 'question-imported',
+            result: 'correct', reviewStatus: 'reviewed', confidence: 0.99,
+        })]);
     });
 
     it('遥测记录与协议、遥测设置属于实例数据，不进入备份', async () => {

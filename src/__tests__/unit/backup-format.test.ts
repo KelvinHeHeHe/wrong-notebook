@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { BACKUP_VERSION, parseBackupFile } from "@/lib/backup/format";
 
 describe("parseBackupFile", () => {
+    it("当前备份版本为 12", () => {
+        expect(BACKUP_VERSION).toBe(12);
+    });
+
     it("接受合法的最小 v1 备份文件", () => {
         const minimal = {
             version: 1,
@@ -50,6 +54,10 @@ describe("parseBackupFile", () => {
             ttsSpeeches: {},
             importTasks: [],
             importBatches: [],
+            examPaperPages: [],
+            examAttempts: [],
+            examAttemptPages: [],
+            examAttemptAnswers: [],
             extensions: {},
         };
         const result = parseBackupFile(full);

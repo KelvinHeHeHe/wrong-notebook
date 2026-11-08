@@ -86,6 +86,25 @@ export async function GET(req: Request) {
             },
         });
 
+        const examPaperPages = await prisma.examPaperPage.findMany({
+            where: { paperId: { in: examPapers.map((paper) => paper.id) } },
+            orderBy: [{ paperId: 'asc' }, { role: 'asc' }, { order: 'asc' }],
+        });
+
+        const examAttempts = await prisma.examAttempt.findMany({
+            where: userFilter,
+            orderBy: [{ takenAt: 'asc' }, { id: 'asc' }],
+        });
+        const examAttemptIds = examAttempts.map((attempt) => attempt.id);
+        const examAttemptPages = await prisma.examAttemptPage.findMany({
+            where: { attemptId: { in: examAttemptIds } },
+            orderBy: [{ attemptId: 'asc' }, { order: 'asc' }],
+        });
+        const examAttemptAnswers = await prisma.examAttemptAnswer.findMany({
+            where: { attemptId: { in: examAttemptIds } },
+            orderBy: [{ attemptId: 'asc' }, { examQuestionId: 'asc' }],
+        });
+
         const paperGroups = await prisma.paperGroup.findMany({
             where: userFilter,
         });
@@ -164,6 +183,10 @@ export async function GET(req: Request) {
                     score: normalizeExamScore(question.score ?? null),
                 })),
             })),
+            examPaperPages,
+            examAttempts,
+            examAttemptPages,
+            examAttemptAnswers,
             paperGroups,
             ttsSpeeches,
             importTasks,
@@ -181,6 +204,10 @@ export async function GET(req: Request) {
             reviewSchedulesCount: reviewSchedules.length,
             practiceRecordsCount: practiceRecords.length,
             examPapersCount: examPapers.length,
+            examPaperPagesCount: examPaperPages.length,
+            examAttemptsCount: examAttempts.length,
+            examAttemptPagesCount: examAttemptPages.length,
+            examAttemptAnswersCount: examAttemptAnswers.length,
             importTasksCount: importTasks.length,
             importBatchesCount: importBatches.length,
             ttsSpeechesCount: ttsSpeeches.length,
