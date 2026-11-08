@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useTimeZone } from "@/contexts/TimeZoneContext";
 import { formatDateTime } from "@/lib/date-time";
-import { FileText, Plus } from "lucide-react";
+import { FileUp, FileText, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -42,11 +42,21 @@ export default function ExamsPage() {
                 <PageHeader
                     title={t.exam.title}
                     description={t.exam.subtitle}
-                    actions={!showForm && (
-                        <Button onClick={() => setShowForm(true)} aria-label={t.exam.create}>
-                            <Plus className="h-4 w-4" />
-                            <span className="hidden sm:inline">{t.exam.create}</span>
-                        </Button>
+                    actions={(
+                        <>
+                            <Button variant="outline" asChild>
+                                <Link href="/exams/import" aria-label={t.examImport.importPaper}>
+                                    <FileUp className="h-4 w-4" />
+                                    <span className="hidden sm:inline">{t.examImport.importPaper}</span>
+                                </Link>
+                            </Button>
+                            {!showForm && (
+                                <Button onClick={() => setShowForm(true)} aria-label={t.exam.create}>
+                                    <Plus className="h-4 w-4" />
+                                    <span className="hidden sm:inline">{t.exam.create}</span>
+                                </Button>
+                            )}
+                        </>
                     )}
                 />
 

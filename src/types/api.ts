@@ -426,8 +426,20 @@ export interface PracticeHistoryResponse {
 
 export type ExamScope = 'unmastered' | 'mastered' | 'all';
 export type ExamPickRule = 'least_practiced' | 'random';
-export type ExamStatus = 'generating' | 'ready' | 'partial' | 'failed';
+export type ExamStatus = 'generating' | 'importing' | 'review' | 'ready' | 'partial' | 'failed';
 export type ExamMode = 'generate' | 'original';
+export type ExamOrigin = 'generated' | 'imported';
+export type ExamPageRole = 'questions' | 'answer_key';
+
+export interface ExamPaperPageDetail {
+    id: string;
+    order: number;
+    role: ExamPageRole;
+    imageData: string;
+    mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+    width: number;
+    height: number;
+}
 
 export interface ExamPaperSummary {
     id: string;
@@ -442,6 +454,13 @@ export interface ExamPaperSummary {
     recordedCount: number;
     resultsRecordedAt: string | null;
     createdAt: string;
+    origin?: ExamOrigin;
+    subjectId?: string | null;
+    gradeSemester?: string | null;
+    examType?: 'unit' | 'midterm' | 'final' | 'daily' | 'other' | null;
+    examDate?: string | null;
+    totalScore?: number | null;
+    sourceFileName?: string | null;
 }
 
 export interface ExamQuestionDetail {
@@ -460,6 +479,10 @@ export interface ExamQuestionDetail {
     answerSpacePx?: number | null;
     /** 每题分值（最多一位小数），空表示未设分值 */
     score?: number | null;
+    externalNumber?: string | null;
+    pageNumber?: number | null;
+    regionJson?: string | null;
+    recognitionConfidence?: number | null;
     /** 创建时快照的题型 key（标准 key），空表示旧数据未快照 */
     questionType?: QuestionType | null;
     /** 关联错题当前的题型 key（原题可能已删除，为 null）；分组时 questionType 为空回退使用 */
@@ -489,4 +512,12 @@ export interface ExamPaperDetail {
     resultsRecordedAt: string | null;
     createdAt: string;
     questions: ExamQuestionDetail[];
+    origin?: ExamOrigin;
+    subjectId?: string | null;
+    gradeSemester?: string | null;
+    examType?: 'unit' | 'midterm' | 'final' | 'daily' | 'other' | null;
+    examDate?: string | null;
+    totalScore?: number | null;
+    sourceFileName?: string | null;
+    pages?: ExamPaperPageDetail[];
 }

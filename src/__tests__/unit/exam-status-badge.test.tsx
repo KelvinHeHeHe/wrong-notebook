@@ -22,4 +22,11 @@ describe('试卷状态徽章', () => {
         expect(getExamDisplayStatus('failed', true)).toBe('failed');
         expect(render(<ExamStatusBadge status="partial" recorded={false} />)).toContain('部分失败');
     });
+
+    it('外部试卷导入中与待校对显示独立状态', () => {
+        expect(getExamDisplayStatus('importing', false)).toBe('importing');
+        expect(getExamDisplayStatus('review', false)).toBe('review');
+        expect(render(<ExamStatusBadge status="importing" recorded={false} />)).toContain('导入中');
+        expect(render(<ExamStatusBadge status="review" recorded={false} />)).toContain('待校对');
+    });
 });
