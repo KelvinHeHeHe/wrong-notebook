@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import type { AIConfig } from "./types";
 import type { CompletionRequest } from './base-provider';
 import type { CompletionResult } from './completion';
-import { compactUsage, readRequestId } from './completion';
+import { compactUsage, completionErrorCode, readRequestId } from './completion';
 import { BaseAIProvider } from './base-provider';
 import { createLogger } from '../logger';
 import { AI_OUTPUT_TRUNCATED } from './truncation';
@@ -63,7 +63,7 @@ export class GeminiProvider extends BaseAIProvider {
             model: this.modelName,
             config: { systemInstruction: request.system },
             contents,
-        }));
+        }), request.task);
 
         const text = response.text || '';
         if (!text) {
@@ -103,7 +103,7 @@ export class GeminiProvider extends BaseAIProvider {
         return contents;
     }
 
-    private async retryOperation<T>(operation: () => Promise<T>, maxRetries: number = 3): Promise<T> {
+    private async retryOperation<T>(operation: () => Promise<T>, task: CompletionRequest['task'], maxRetries: number = 3): Promise<T> {
         let lastError: unknown;
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -134,7 +134,9 @@ export class GeminiProvider extends BaseAIProvider {
                 }
 
                 const delay = Math.pow(2, attempt - 1) * 1000; // Exponential backoff: 1s, 2s, 4s
-                logger.warn({ attempt, maxRetries, error: msg, nextRetryDelayMs: delay }, 'Gemini operation failed, retrying...');
+                // 答案提取的上游错误可能回显图片或学生作答，只保留标准错误码。
+                const errorMetadata = task === 'exam-answer-extraction' ? { errorCode: completionErrorCode(error) } : { error: msg };
+                logger.warn({ attempt, maxRetries, ...errorMetadata, nextRetryDelayMs: delay }, 'Gemini operation failed, retrying...');
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
         }

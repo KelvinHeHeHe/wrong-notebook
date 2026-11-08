@@ -3,9 +3,12 @@
  *
  * 测试 Gemini 服务响应解析和错因同步
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockGenerateContent = vi.hoisted(() => vi.fn());
+const mockLogger = vi.hoisted(() => ({
+    debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), box: vi.fn(), divider: vi.fn(),
+}));
 
 // Mock Google GenAI SDK
 vi.mock('@google/genai', () => {
@@ -20,14 +23,7 @@ vi.mock('@google/genai', () => {
 
 // Mock logger
 vi.mock('@/lib/logger', () => ({
-    createLogger: vi.fn(() => ({
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        box: vi.fn(),
-        divider: vi.fn(),
-    })),
+    createLogger: vi.fn(() => mockLogger),
 }));
 
 // Mock config
@@ -51,6 +47,53 @@ vi.mock('@/lib/ai/tag-service', () => ({
 // Delayed import to ensure mocks are applied
 import { GeminiProvider } from '@/lib/ai/gemini-provider';
 import { parseQuestionResponse } from '@/lib/ai/response-parser';
+
+describe('Gemini 试卷答案提取重试日志', () => {
+    const input = {
+        imageBase64: '私密图片QUJD', mimeType: 'image/png', language: 'zh' as const,
+        questions: [{ id: 'q1', displayNumber: 1, sourceShortId: 'ABC123', questionText: '私密候选题全文' }],
+    };
+    const privateAnswer = '私密学生答案';
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.clearAllMocks();
+        mockGenerateContent.mockReset();
+    });
+
+    afterEach(() => vi.useRealTimers());
+
+    describe.each([
+        ['503 unavailable', 'AI_SERVICE_UNAVAILABLE'],
+        ['network unreachable', 'AI_CONNECTION_FAILED'],
+        ['timeout', 'AI_TIMEOUT_ERROR'],
+    ])('%s', (message, errorCode) => {
+      it.each([true, false])('重试成功=%s 时日志仅包含安全元数据', async (succeeds) => {
+        const rawMessage = `${message} ${input.imageBase64} ${privateAnswer} ${input.questions[0].questionText}`;
+        const provider = new GeminiProvider({ apiKey: 'test-key' });
+        if (succeeds) {
+            mockGenerateContent.mockRejectedValueOnce(new Error(rawMessage)).mockResolvedValueOnce({ text: '{"candidates":[]}' });
+        } else {
+            mockGenerateContent.mockRejectedValue(new Error(rawMessage));
+        }
+        const result = provider.extractExamPageAnswers(input);
+        const assertion = succeeds ? expect(result).resolves.toEqual({ candidates: [] }) : expect(result).rejects.toThrow(errorCode);
+        await vi.runAllTimersAsync();
+        await assertion;
+        expect(mockGenerateContent).toHaveBeenCalledTimes(succeeds ? 2 : 3);
+        const expectedWarnings = [
+            [{ attempt: 1, maxRetries: 3, errorCode, nextRetryDelayMs: 1000 }, expect.any(String)],
+        ];
+        if (!succeeds) expectedWarnings.push([{ attempt: 2, maxRetries: 3, errorCode, nextRetryDelayMs: 2000 }, expect.any(String)]);
+        expect(mockLogger.warn.mock.calls).toEqual(expectedWarnings);
+        const logs = JSON.stringify(Object.values(mockLogger).flatMap((method) => method.mock.calls)).toLowerCase();
+        expect(logs).not.toContain(rawMessage.toLowerCase());
+        expect(logs).not.toContain(input.imageBase64.toLowerCase());
+        expect(logs).not.toContain(privateAnswer);
+        expect(logs).not.toContain(input.questions[0].questionText);
+      });
+    });
+});
 
 type PrivateGeminiProvider = {
     handleError(error: unknown): never;
