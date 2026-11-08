@@ -11,6 +11,10 @@ export interface ImportStats {
     errorItemsCreated: number;
     reviewSchedulesCreated: number;
     examPapersCreated: number;
+    examPaperPagesCreated: number;
+    examAttemptsCreated: number;
+    examAttemptPagesCreated: number;
+    examAttemptAnswersCreated: number;
     preferencesRestored: boolean;
     practiceRecordsCreated: number;
     tagsLinked: number;
@@ -50,8 +54,13 @@ export interface ImportContext {
     errorItemIdMap: Map<string, string>;
     errorItemOwnerMap: Map<string, string>;
     examPaperIdMap: Map<string, string>;
+    examPaperOwnerMap: Map<string, string>;
     examQuestionIdMap: Map<string, string>;
     examQuestionOwnerMap: Map<string, string>;
+    examQuestionPaperMap: Map<string, string>;
+    examAttemptIdMap: Map<string, string>;
+    examAttemptOwnerMap: Map<string, string>;
+    examAttemptPaperMap: Map<string, string>;
 }
 
 export interface ImportWriterOptions {
@@ -81,6 +90,10 @@ export function createImportContext({ tx, user, importAll, normalized }: ImportW
             errorItemsCreated: 0,
             reviewSchedulesCreated: 0,
             examPapersCreated: 0,
+            examPaperPagesCreated: 0,
+            examAttemptsCreated: 0,
+            examAttemptPagesCreated: 0,
+            examAttemptAnswersCreated: 0,
             preferencesRestored: false,
             practiceRecordsCreated: 0,
             tagsLinked: 0,
@@ -103,7 +116,12 @@ export function createImportContext({ tx, user, importAll, normalized }: ImportW
         errorItemIdMap: new Map<string, string>(),
         errorItemOwnerMap: new Map<string, string>(),
         examPaperIdMap: new Map<string, string>(),
+        examPaperOwnerMap: new Map<string, string>(),
         examQuestionIdMap: new Map<string, string>(),
         examQuestionOwnerMap: new Map<string, string>(),
+        examQuestionPaperMap: new Map<string, string>(),
+        examAttemptIdMap: new Map<string, string>(),
+        examAttemptOwnerMap: new Map<string, string>(),
+        examAttemptPaperMap: new Map<string, string>(),
     };
 }

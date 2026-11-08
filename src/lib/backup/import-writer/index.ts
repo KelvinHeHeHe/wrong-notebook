@@ -9,6 +9,7 @@ import { importPreferences, importSubjects } from "./subjects";
 import { importSystemTags, importCustomTags, preloadErrorItemTags } from "./tags";
 import { importPaperGroups, importErrorItems } from "./error-items";
 import { importReviewSchedules, importExamPapers } from "./exams";
+import { importExamAttemptDetails, importExamAttempts, importExamPaperPages } from "./attempts";
 import { importPracticeRecords, syncMasteryThreshold } from "./practice";
 import { importBatchesAndTasks, importRegisteredExtensions } from "./misc";
 
@@ -32,10 +33,14 @@ export async function importBackupData(options: ImportWriterOptions): Promise<Im
     // 5-6. 复习计划与试卷
     await importReviewSchedules(ctx);
     await importExamPapers(ctx);
-    // 7、9. 练习记录与掌握阈值同步
+    // 7-9. 试卷页面、作答主记录与逐题详情
+    await importExamPaperPages(ctx);
+    await importExamAttempts(ctx);
+    await importExamAttemptDetails(ctx);
+    // 10、12. 练习记录与掌握阈值同步
     await importPracticeRecords(ctx);
     await syncMasteryThreshold(ctx);
-    // 8、10. 导入批次/任务与扩展数据
+    // 11、13. 导入批次/任务与扩展数据
     await importBatchesAndTasks(ctx);
     await importRegisteredExtensions(ctx);
 

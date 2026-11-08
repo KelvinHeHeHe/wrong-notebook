@@ -40,7 +40,11 @@ export async function importReviewSchedules(ctx: ImportContext): Promise<void> {
 
 /** 6. 导入试卷：同一用户下标题和创建时间都相同视为已导入过，只建立题目映射 */
 export async function importExamPapers(ctx: ImportContext): Promise<void> {
-    const { tx, user, importAll, normalized, stats, examPaperIdMap, examQuestionIdMap, examQuestionOwnerMap, subjectIdMap, errorItemIdMap, errorItemOwnerMap } = ctx;
+    const {
+        tx, user, importAll, normalized, stats,
+        examPaperIdMap, examPaperOwnerMap, examQuestionIdMap, examQuestionOwnerMap, examQuestionPaperMap,
+        subjectIdMap, errorItemIdMap, errorItemOwnerMap,
+    } = ctx;
     for (const paper of normalized.examPapers) {
         const { raw } = paper;
         const targetUserId = importAll ? raw.userId : user.id;
@@ -51,11 +55,13 @@ export async function importExamPapers(ctx: ImportContext): Promise<void> {
         });
         if (existing) {
             examPaperIdMap.set(raw.id, existing.id);
+            examPaperOwnerMap.set(raw.id, targetUserId);
             for (const question of questions) {
                 const matched = existing.questions.find((candidate) => candidate.order === question.order);
                 if (matched) {
                     examQuestionIdMap.set(question.id, matched.id);
                     examQuestionOwnerMap.set(question.id, targetUserId);
+                    examQuestionPaperMap.set(question.id, existing.id);
                 }
             }
             continue;
@@ -73,6 +79,13 @@ export async function importExamPapers(ctx: ImportContext): Promise<void> {
                 subjectIds: mapSubjectIds(raw.subjectIds, subjectIdMap),
                 tagNames: paper.tagNames,
                 groupByType: paper.groupByType,
+                origin: paper.origin,
+                subjectId: raw.subjectId ? subjectIdMap.get(raw.subjectId) ?? null : null,
+                gradeSemester: paper.gradeSemester,
+                examType: paper.examType,
+                examDate: paper.examDate,
+                totalScore: paper.totalScore,
+                sourceFileName: paper.sourceFileName,
                 resultsRecordedAt: paper.resultsRecordedAt,
                 createdAt: paper.createdAt,
                 updatedAt: paper.updatedAt,
@@ -97,13 +110,23 @@ export async function importExamPapers(ctx: ImportContext): Promise<void> {
                     answerSpacePx: normalizeCustomAnswerSpacePx(question.answerSpacePx),
                     score: normalizeExamScore(question.score ?? null),
                     questionType: normalizeQuestionType(question.questionType),
+                    externalNumber: typeof question.externalNumber === 'string' ? question.externalNumber : null,
+                    pageNumber: Number.isInteger(question.pageNumber) && Number(question.pageNumber) > 0 ? Number(question.pageNumber) : null,
+                    regionJson: typeof question.regionJson === 'string' ? question.regionJson : null,
+                    recognitionConfidence: typeof question.recognitionConfidence === 'number'
+                        && Number.isFinite(question.recognitionConfidence)
+                        && question.recognitionConfidence >= 0
+                        && question.recognitionConfidence <= 1
+                        ? question.recognitionConfidence : null,
                     error: question.error,
                 },
             });
             examQuestionIdMap.set(question.id, createdQuestion.id);
             examQuestionOwnerMap.set(question.id, targetUserId);
+            examQuestionPaperMap.set(question.id, created.id);
         }
         examPaperIdMap.set(raw.id, created.id);
+        examPaperOwnerMap.set(raw.id, targetUserId);
         stats.examPapersCreated++;
     }
 }
