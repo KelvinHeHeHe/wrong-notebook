@@ -63,6 +63,7 @@ export const upsertExamPagesSchema = z.object({
 
 export const recognizeExamPagesSchema = z.object({
     pageOrders: z.array(z.number().int().min(1).max(MAX_IMPORTED_EXAM_PAGES)).min(1).max(MAX_IMPORTED_EXAM_PAGES),
+    language: z.enum(['zh', 'en']).default('zh'),
 }).superRefine((value, context) => {
     if (new Set(value.pageOrders).size !== value.pageOrders.length) {
         context.addIssue({ code: 'custom', path: ['pageOrders'], message: 'EXAM_PAGE_ORDER_DUPLICATE' });
