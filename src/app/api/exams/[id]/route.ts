@@ -59,6 +59,7 @@ export const GET = withUser(async (
         const paper = await prisma.examPaper.findUnique({
             where: { id },
             include: {
+                pages: { orderBy: { order: 'asc' } },
                 questions: {
                     orderBy: { order: 'asc' },
                     include: {
@@ -77,9 +78,10 @@ export const GET = withUser(async (
             void generateExamPaper(paper.id);
         }
 
-        const { userId: _userId, questions, ...rest } = paper;
+        const { userId: _userId, questions, pages, ...rest } = paper;
         return NextResponse.json({
             ...rest,
+            pages: [...(pages ?? [])].sort((a, b) => a.order - b.order),
             questions: questions.map(({ errorItem, practiceRecords, ...question }) => ({
                 ...question,
                 figureScale: normalizeFigureScale(question.figureScale),
