@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { notFound, validationError, internalError } from "@/lib/api-errors";
+import { conflict, notFound, validationError, internalError } from "@/lib/api-errors";
 import { createLogger } from "@/lib/logger";
 import { generateExamPaper, isPaperGenerating } from "@/lib/exam/exam";
 import { FIGURE_ALIGNS, MAX_FIGURE_SCALE, MIN_FIGURE_SCALE, normalizeFigureAlign, normalizeFigureScale } from "@/lib/figure-scale";
@@ -9,8 +9,10 @@ import type { FigureAlign } from "@/lib/figure-scale";
 import { MAX_CUSTOM_ANSWER_SPACE_PX, MIN_CUSTOM_ANSWER_SPACE_PX, normalizeCustomAnswerSpacePx } from "@/lib/exam/exam-answer-space";
 import { MAX_EXAM_SCORE, MIN_EXAM_SCORE, normalizeExamScore } from "@/lib/exam/exam-score";
 import { normalizeQuestionType } from "@/lib/question/question-type";
+import { validateImportedExamForPublish } from "@/lib/exam/exam-import";
 import { withUser } from "@/lib/api-handler";
 import type { AuthenticatedContext } from "@/lib/api-handler";
+import { updateImportedExamSchema } from "@/lib/schemas/exam";
 
 const logger = createLogger('api:exams:id');
 
@@ -113,6 +115,133 @@ export const PATCH = withUser(async (
 
     try {
         const body: unknown = await req.json().catch(() => ({}));
+
+        if (typeof body === 'object' && body !== null && 'kind' in body && body.kind === 'import-draft') {
+            const importedParsed = updateImportedExamSchema.safeParse(body);
+            if (!importedParsed.success) {
+                return validationError('Invalid imported exam update', importedParsed.error.issues);
+            }
+            const input = importedParsed.data;
+            const paper = await prisma.examPaper.findUnique({
+                where: { id },
+                select: {
+                    userId: true,
+                    origin: true,
+                    status: true,
+                    subjectId: true,
+                    pages: { select: { id: true, order: true, role: true } },
+                    questions: { select: { id: true, pageNumber: true } },
+                },
+            });
+            if (!paper || paper.userId !== user.id || paper.origin !== 'imported') {
+                return notFound('Exam paper not found');
+            }
+            if (paper.status === 'ready') return conflict('IMPORTED_EXAM_ALREADY_PUBLISHED');
+
+            const subjectId = input.subjectId ?? paper.subjectId;
+            if (!subjectId) return validationError('Invalid subject');
+            const subject = await prisma.subject.findFirst({
+                where: { id: subjectId, userId: user.id },
+                select: { id: true },
+            });
+            if (!subject) return validationError('Invalid subject');
+
+            const ownPageIds = new Set(paper.pages.map((page) => page.id));
+            if (input.pages.length !== paper.pages.length || input.pages.some((page) => !ownPageIds.has(page.id))) {
+                return validationError('Invalid imported exam pages');
+            }
+            const ownQuestionIds = new Set(paper.questions.map((question) => question.id));
+            if (input.questions.some((question) => question.id && !ownQuestionIds.has(question.id))) {
+                return validationError('Invalid imported exam questions');
+            }
+
+            const questionPageOrders = new Set(input.pages.filter((page) => page.role === 'questions').map((page) => page.order));
+            if (input.questions.some((question) => !questionPageOrders.has(question.pageNumber))) {
+                if (!input.publish) return validationError('Invalid imported exam question page', ['QUESTION_PAGE_INVALID']);
+            }
+
+            const publishValidation = input.publish
+                ? validateImportedExamForPublish({
+                    pages: input.pages,
+                    questions: input.questions,
+                    totalScore: input.totalScore,
+                })
+                : null;
+            if (publishValidation && !publishValidation.ok) {
+                return validationError('Imported exam is not ready to publish', publishValidation.errors);
+            }
+            const finalTotalScore = publishValidation?.ok
+                ? publishValidation.totalScore
+                : input.totalScore ?? null;
+
+            const updated = await prisma.$transaction(async (tx) => {
+                // 先移到临时页序，避免交换页序/角色时触发 SQLite 联合唯一索引。
+                for (const page of paper.pages) {
+                    await tx.examPaperPage.update({ where: { id: page.id }, data: { order: page.order + 1000 } });
+                }
+                for (const page of input.pages) {
+                    await tx.examPaperPage.update({ where: { id: page.id }, data: { order: page.order, role: page.role } });
+                }
+
+                const incomingQuestionIds = input.questions
+                    .map((question) => question.id)
+                    .filter((questionId): questionId is string => questionId !== undefined);
+                await tx.examQuestion.deleteMany({
+                    where: {
+                        paperId: id,
+                        ...(incomingQuestionIds.length > 0 ? { id: { notIn: incomingQuestionIds } } : {}),
+                    },
+                });
+
+                for (let index = 0; index < input.questions.length; index += 1) {
+                    const question = input.questions[index];
+                    const data = {
+                        order: index + 1,
+                        status: 'ready',
+                        externalNumber: question.externalNumber ?? null,
+                        pageNumber: question.pageNumber,
+                        regionJson: JSON.stringify(question.regions),
+                        questionText: question.questionText,
+                        answerText: question.answerText ?? null,
+                        analysis: question.analysis ?? null,
+                        questionType: normalizeQuestionType(question.questionType),
+                        score: question.score ?? null,
+                        error: null,
+                    };
+                    if (question.id) {
+                        await tx.examQuestion.update({ where: { id: question.id }, data });
+                    } else {
+                        await tx.examQuestion.create({
+                            data: {
+                                paperId: id,
+                                sourceShortId: `IMP-MANUAL-${String(index + 1).padStart(3, '0')}`,
+                                errorItemId: null,
+                                recognitionConfidence: null,
+                                figureSvg: null,
+                                ...data,
+                            },
+                        });
+                    }
+                }
+
+                return tx.examPaper.update({
+                    where: { id },
+                    data: {
+                        title: input.title,
+                        subjectId,
+                        subjectIds: JSON.stringify([subjectId]),
+                        gradeSemester: input.gradeSemester ?? null,
+                        examType: input.examType ?? null,
+                        examDate: input.examDate ? new Date(input.examDate) : null,
+                        totalScore: finalTotalScore,
+                        requestedCount: input.questions.length,
+                        status: input.publish ? 'ready' : 'review',
+                    },
+                    select: { id: true, status: true, totalScore: true },
+                });
+            });
+            return NextResponse.json(updated);
+        }
 
         // 按题型分大题开关：请求体含 groupByType 时走此分支（与其他分支互斥，多余字段视为非法）
         if (typeof body === 'object' && body !== null && 'groupByType' in body) {
