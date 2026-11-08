@@ -7,7 +7,12 @@ import type { ImportContext } from "./types";
 
 /** 7. 导入 practice records */
 export async function importPracticeRecords(ctx: ImportContext): Promise<void> {
-    const { tx, user, importAll, normalized, stats, masteryIds, evaluatedIds, errorItemIdMap, errorItemOwnerMap, examQuestionIdMap, examQuestionOwnerMap } = ctx;
+    const {
+        tx, user, importAll, normalized, stats, masteryIds, evaluatedIds,
+        errorItemIdMap, errorItemOwnerMap,
+        examQuestionIdMap, examQuestionOwnerMap, examQuestionPaperMap,
+        examAttemptIdMap, examAttemptOwnerMap, examAttemptPaperMap,
+    } = ctx;
     for (const record of normalized.practiceRecords) {
         const { raw } = record;
         const targetUserId = importAll ? raw.userId : user.id;
@@ -15,6 +20,18 @@ export async function importPracticeRecords(ctx: ImportContext): Promise<void> {
             ? errorItemIdMap.get(raw.errorItemId) : undefined;
         const examQuestionId = raw.examQuestionId && examQuestionOwnerMap.get(raw.examQuestionId) === targetUserId
             ? examQuestionIdMap.get(raw.examQuestionId) : undefined;
+        const mappedExamAttemptId = raw.examAttemptId && examAttemptOwnerMap.get(raw.examAttemptId) === targetUserId
+            ? examAttemptIdMap.get(raw.examAttemptId) : undefined;
+        const examAttemptId = mappedExamAttemptId && raw.examAttemptId && raw.examQuestionId
+            && examAttemptPaperMap.get(raw.examAttemptId) === examQuestionPaperMap.get(raw.examQuestionId)
+            ? mappedExamAttemptId : undefined;
+        if (examAttemptId && examQuestionId) {
+            const existing = await tx.practiceRecord.findUnique({
+                where: { examAttemptId_examQuestionId: { examAttemptId, examQuestionId } },
+                select: { id: true },
+            });
+            if (existing) continue;
+        }
         await tx.practiceRecord.create({
             data: {
                 userId: targetUserId,
@@ -33,6 +50,7 @@ export async function importPracticeRecords(ctx: ImportContext): Promise<void> {
                     figureSvg: sanitizeFigureSvg(raw.figureSvg),
                     source: record.source,
                     examQuestionId,
+                    examAttemptId,
                 } : {}),
                 createdAt: record.createdAt,
             },

@@ -11,7 +11,7 @@ import { z } from "zod";
  */
 
 /** 当前备份文件版本号 */
-export const BACKUP_VERSION = 11;
+export const BACKUP_VERSION = 12;
 
 /** 备份文件中的用户对象 */
 export interface BackupUser {
@@ -162,6 +162,8 @@ export interface BackupPracticeRecord {
     figureSvg?: string | null;
     source?: string;
     examQuestionId?: string | null;
+    /** version 12 起导出 */
+    examAttemptId?: string | null;
     createdAt: string | Date;
 }
 
@@ -186,6 +188,11 @@ export interface BackupExamQuestion {
     score?: number | null;
     /** version 11 起导出，旧版备份缺省为 null（分组时回退读取关联错题当前题型） */
     questionType?: string | null;
+    /** version 12 起导出 */
+    externalNumber?: string | null;
+    pageNumber?: number | null;
+    regionJson?: string | null;
+    recognitionConfidence?: number | null;
     error: string | null;
 }
 
@@ -201,6 +208,14 @@ export interface BackupExamPaper {
     mode?: string;
     /** version 11 起导出，旧版缺省 false（不按题型分大题） */
     groupByType?: boolean;
+    /** version 12 起导出，旧版缺省 generated */
+    origin?: string;
+    subjectId?: string | null;
+    gradeSemester?: string | null;
+    examType?: string | null;
+    examDate?: string | Date | null;
+    totalScore?: number | null;
+    sourceFileName?: string | null;
     requestedCount: number;
     subjectIds: string;
     tagNames: string | null;
@@ -208,6 +223,68 @@ export interface BackupExamPaper {
     createdAt: string | Date;
     updatedAt: string | Date;
     questions: BackupExamQuestion[];
+}
+
+/** 外部整卷的本地页面（version 12 起导出） */
+export interface BackupExamPaperPage {
+    id: string;
+    paperId: string;
+    order: number;
+    role: string;
+    imageData: string;
+    mimeType: string;
+    width: number | null;
+    height: number | null;
+    checksum: string;
+    createdAt: string | Date;
+    updatedAt: string | Date;
+}
+
+/** 一份试卷的一次纸质作答（version 12 起导出） */
+export interface BackupExamAttempt {
+    id: string;
+    userId: string;
+    paperId: string;
+    status: string;
+    takenAt: string | Date;
+    totalScore: number | null;
+    maxScore: number | null;
+    comment: string | null;
+    confirmedAt: string | Date | null;
+    createdAt: string | Date;
+    updatedAt: string | Date;
+}
+
+/** 纸质作答的本地回传页面（version 12 起导出） */
+export interface BackupExamAttemptPage {
+    id: string;
+    attemptId: string;
+    order: number;
+    imageData: string;
+    mimeType: string;
+    width: number | null;
+    height: number | null;
+    checksum: string;
+    createdAt: string | Date;
+    updatedAt: string | Date;
+}
+
+/** 一次作答的逐题评分草稿（version 12 起导出） */
+export interface BackupExamAttemptAnswer {
+    id: string;
+    attemptId: string;
+    examQuestionId: string;
+    recognizedAnswer: string | null;
+    result: string | null;
+    awardedScore: number | null;
+    maxScore: number | null;
+    gradingSource: string | null;
+    gradingReason: string | null;
+    confidence: number | null;
+    reviewStatus: string;
+    regionJson: string | null;
+    createdAt: string | Date;
+    updatedAt: string | Date;
 }
 
 /** 卷别分组（version 3 起导出） */
@@ -241,6 +318,10 @@ export interface BackupFile {
     reviewSchedules: BackupReviewSchedule[];
     practiceRecords: BackupPracticeRecord[];
     examPapers: BackupExamPaper[];
+    examPaperPages: BackupExamPaperPage[];
+    examAttempts: BackupExamAttempt[];
+    examAttemptPages: BackupExamAttemptPage[];
+    examAttemptAnswers: BackupExamAttemptAnswer[];
     paperGroups: BackupPaperGroup[];
     /** 动画讲解的云端语音 */
     ttsSpeeches: unknown[];
@@ -295,6 +376,33 @@ export type ImportedBackupPracticeRecord = Omit<BackupPracticeRecord, "createdAt
 /** 导入侧的试卷 */
 export type ImportedBackupExamPaper = Omit<BackupExamPaper, "resultsRecordedAt" | "createdAt" | "updatedAt"> & {
     resultsRecordedAt: ImportedDate | null;
+    examDate?: ImportedDate | null;
+    createdAt: ImportedDate;
+    updatedAt: ImportedDate;
+};
+
+/** 导入侧的外部整卷页面 */
+export type ImportedBackupExamPaperPage = Omit<BackupExamPaperPage, "createdAt" | "updatedAt"> & {
+    createdAt: ImportedDate;
+    updatedAt: ImportedDate;
+};
+
+/** 导入侧的一次纸质作答 */
+export type ImportedBackupExamAttempt = Omit<BackupExamAttempt, "takenAt" | "confirmedAt" | "createdAt" | "updatedAt"> & {
+    takenAt: ImportedDate;
+    confirmedAt: ImportedDate | null;
+    createdAt: ImportedDate;
+    updatedAt: ImportedDate;
+};
+
+/** 导入侧的纸质作答页面 */
+export type ImportedBackupExamAttemptPage = Omit<BackupExamAttemptPage, "createdAt" | "updatedAt"> & {
+    createdAt: ImportedDate;
+    updatedAt: ImportedDate;
+};
+
+/** 导入侧的逐题评分草稿 */
+export type ImportedBackupExamAttemptAnswer = Omit<BackupExamAttemptAnswer, "createdAt" | "updatedAt"> & {
     createdAt: ImportedDate;
     updatedAt: ImportedDate;
 };
@@ -322,6 +430,10 @@ export interface ImportableBackupFile {
     reviewSchedules?: ImportedBackupReviewSchedule[];
     practiceRecords?: ImportedBackupPracticeRecord[];
     examPapers?: ImportedBackupExamPaper[];
+    examPaperPages?: ImportedBackupExamPaperPage[];
+    examAttempts?: ImportedBackupExamAttempt[];
+    examAttemptPages?: ImportedBackupExamAttemptPage[];
+    examAttemptAnswers?: ImportedBackupExamAttemptAnswer[];
     paperGroups?: ImportedBackupPaperGroup[];
     ttsSpeeches?: unknown;
     importTasks?: unknown;
