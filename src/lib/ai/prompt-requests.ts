@@ -7,6 +7,7 @@ import {
     generateTagSuggestPrompt, generateFigurePrompt, generateSvgAnimationPrompt,
     generateSvgNarrationPrompt, generateLatexFixPrompt, generateGradeRecognitionPrompt, generateQuestionSplitPrompt,
     generateTextFixPrompt,
+    generateExamAnswerExtractionPrompt,
     SVG_ANIMATION_REQUEST, SVG_NARRATION_REQUEST,
 } from './prompts';
 import type { PromptOptions, PromptRequest, LatexFixField } from './prompts';
@@ -14,6 +15,7 @@ import type { AnswerGradingInput, GradeLevel, MasteryEvaluationInput, TagSuggest
 import type { LatexFixInput } from './latex-fix';
 import type { QuestionSplitInput } from './question-split';
 import type { TextFixInput } from './text-fix';
+import type { ExamPageAnswerExtractionInput } from './exam-answer-extraction';
 
 // 只有受限的控制值可以进入系统规则；所有自由文本通过 JSON 数据消息传递。
 function safeGrade(value?: string | null): string | null {
@@ -166,5 +168,16 @@ export function generateTextFixRequest(input: TextFixInput): PromptRequest {
         generateTextFixPrompt(),
         { questions: input.map(({ id, text }) => ({ id, text })) },
         '请按系统规则逐题整理 data.questions 中的题目文字，只输出 JSON。',
+    );
+}
+
+/** 图片由提供商单独发送，候选题只进入用户数据消息。 */
+export function generateExamAnswerExtractionRequest(input: ExamPageAnswerExtractionInput): PromptRequest {
+    return createPromptRequest(
+        generateExamAnswerExtractionPrompt(input.language),
+        { questions: input.questions.map(({ id, displayNumber, sourceShortId, questionText }) => ({
+            id, displayNumber, sourceShortId, questionText: questionText.slice(0, 160),
+        })) },
+        '请按系统规则提取本页图片中可见的学生答案，只输出 JSON。',
     );
 }

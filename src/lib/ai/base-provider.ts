@@ -4,7 +4,8 @@ import type { AIService, GradeLevel, ParsedQuestion, DifficultyLevel, ReanswerQu
 import type { LatexFixInput, LatexFixResult } from './latex-fix';
 import type { QuestionSplitInput, QuestionSplitResult } from './question-split';
 import type { TextFixInput, TextFixResult } from './text-fix';
-import { generateGradeRecognitionRequest, generateAnalyzeRequest, generateSimilarQuestionRequest, generateReanswerRequest, generateGeogebraRequest, generateMasteryRequest, generateGradingRequest, generateTagSuggestRequest, generateFigureRequest, generateSvgAnimationRequest, generateSvgNarrationRequest, generateLatexFixRequest, generateQuestionSplitRequest, generateTextFixRequest } from './prompt-requests';
+import type { ExamPageAnswerExtractionInput, ExamPageAnswerExtractionResult } from './exam-answer-extraction';
+import { generateGradeRecognitionRequest, generateAnalyzeRequest, generateSimilarQuestionRequest, generateReanswerRequest, generateGeogebraRequest, generateMasteryRequest, generateGradingRequest, generateTagSuggestRequest, generateFigureRequest, generateSvgAnimationRequest, generateSvgNarrationRequest, generateLatexFixRequest, generateQuestionSplitRequest, generateTextFixRequest, generateExamAnswerExtractionRequest } from './prompt-requests';
 import { parseNarration, sanitizeSvgAnimation } from '../svg-animation';
 import type { NarrationSegment } from '../svg-animation';
 import { parseLatexFix } from './latex-fix';
@@ -20,6 +21,7 @@ import { normalizeGeneratedQuestion } from './generated-question';
 import { normalizeAiQuestionTags } from './knowledge-points';
 import { isImageUnsupportedError, parseQuestionSplit, AI_IMAGE_NOT_SUPPORTED } from './question-split';
 import { parseTextFix } from './text-fix';
+import { parseExamPageAnswerExtraction } from './exam-answer-extraction';
 import type { CompletionObserver, CompletionResult } from './completion';
 import { completionErrorCode } from './completion';
 
@@ -45,7 +47,8 @@ export type CompletionTask =
     | 'svg-animation'
     | 'svg-narration'
     | 'question-split'
-    | 'text-fix';
+    | 'text-fix'
+    | 'exam-answer-extraction';
 
 export interface CompletionRequest {
     task: CompletionTask;
@@ -57,7 +60,7 @@ export interface CompletionRequest {
 }
 
 /**
- * AI 提供商公共基类：实现 AIService 的 14 个业务方法。
+ * AI 提供商公共基类：统一实现 AIService 的业务方法。
  * 子类只需实现 providerName（日志用）、configuredModel 和 complete（调用各自 SDK，返回正文、用量与请求 ID）。
  * 业务方法统一经 run 调用 complete，run 负责计时并通知补全观察者。
  */
@@ -378,6 +381,23 @@ export abstract class BaseAIProvider implements AIService {
             logger.error({ error, stack: error instanceof Error ? error.stack : undefined }, 'Error during text fix');
             this.handleError(error);
             throw error;
+        }
+    }
+
+    async extractExamPageAnswers(input: ExamPageAnswerExtractionInput): Promise<ExamPageAnswerExtractionResult> {
+        const prompt = generateExamAnswerExtractionRequest(input);
+        logger.info({ provider: this.providerName, questionCount: input.questions.length }, '试卷答案提取请求');
+        try {
+            const text = await this.run({
+                task: 'exam-answer-extraction', system: prompt.system, user: prompt.user,
+                image: { base64: input.imageBase64, mimeType: input.mimeType },
+            });
+            return parseExamPageAnswerExtraction(text);
+        } catch (error) {
+            const code = isImageUnsupportedError(error) ? AI_IMAGE_NOT_SUPPORTED : completionErrorCode(error);
+            // 上游错误可能回显学生答案或图片，只记录并透传标准错误码。
+            logger.error({ provider: this.providerName, code }, '试卷答案提取失败');
+            throw new Error(code);
         }
     }
 }

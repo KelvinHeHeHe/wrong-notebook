@@ -15,8 +15,8 @@ export const AI_PROVIDER_IDS = [
     'gemini',
 ] as const satisfies readonly AiProviderId[];
 
-/** 走图片输入的调用：识别、配图重绘、图片分题、带图重新解题 */
-const VISION_TASKS: Record<string, true> = { analyze: true, figure: true, reanswer: true, split: true };
+/** 走图片输入的调用：识别、配图重绘、图片分题、带图重新解题、试卷答案提取 */
+const VISION_TASKS: Record<string, true> = { analyze: true, figure: true, reanswer: true, split: true, 'exam-answer-extraction': true };
 
 export type AiRouteRole = 'vision' | 'text';
 

@@ -1,3 +1,5 @@
+import "server-only";
+
 import { AnthropicProvider } from "./anthropic-provider";
 import type { AIService } from "./types";
 import type { CompletionObserver } from "./completion";
@@ -89,5 +91,9 @@ export class MiniMaxCodeProvider implements AIService {
 
     fixQuestionText(...args: Parameters<AIService['fixQuestionText']>) {
         return this.run((p) => p.fixQuestionText(...args));
+    }
+
+    extractExamPageAnswers(...args: Parameters<AIService['extractExamPageAnswers']>) {
+        return this.run((p) => p.extractExamPageAnswers(...args));
     }
 }

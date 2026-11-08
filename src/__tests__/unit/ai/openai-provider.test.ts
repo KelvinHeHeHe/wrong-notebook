@@ -6,6 +6,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockCompletionCreate = vi.hoisted(() => vi.fn());
+const mockLogger = vi.hoisted(() => ({
+    debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), box: vi.fn(), divider: vi.fn(),
+}));
 
 // Mock OpenAI SDK
 vi.mock('openai', async () => {
@@ -23,14 +26,7 @@ vi.mock('openai', async () => {
 
 // Mock logger
 vi.mock('@/lib/logger', () => ({
-    createLogger: vi.fn(() => ({
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        box: vi.fn(),
-        divider: vi.fn(),
-    })),
+    createLogger: vi.fn(() => mockLogger),
 }));
 
 // Mock config
@@ -603,6 +599,51 @@ describe('OpenAI Provider 用量与请求 ID', () => {
                 usage: { inputTokens: 900, outputTokens: 80 },
                 requestId: 'longcat-1',
             }));
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('试卷答案提取使用 LongCat input_image 直连格式并保留用量', async () => {
+        mockCompletionCreate.mockResolvedValue({ choices: [{ finish_reason: 'stop', message: { content: '{"candidates":[]}' } }] });
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+            choices: [{ finish_reason: 'stop', message: { content: '{"candidates":[]}' } }],
+            usage: { prompt_tokens: 90, completion_tokens: 8 },
+        }), { status: 200, headers: { 'x-request-id': 'longcat-exam' } }));
+        vi.stubGlobal('fetch', fetchMock);
+        try {
+            const provider = new OpenAIProvider({ apiKey: 'test-key', model: 'LongCat-Flash', baseUrl: 'https://api.longcat.chat/openai/v1' });
+            const observer = vi.fn();
+            provider.observeCompletions(observer);
+            await expect(provider.extractExamPageAnswers({
+                imageBase64: 'QUJD', mimeType: 'image/png', language: 'zh', questions: [],
+            })).resolves.toEqual({ candidates: [] });
+            expect(fetchMock).toHaveBeenCalledOnce();
+            expect(mockCompletionCreate).not.toHaveBeenCalled();
+            const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+            expect(body.messages[1].content).toEqual(expect.arrayContaining([
+                { type: 'input_image', input_image: { data: ['data:image/png;base64,QUJD'], type: 'url' } },
+            ]));
+            expect(observer).toHaveBeenCalledWith(expect.objectContaining({
+                task: 'exam-answer-extraction', usage: { inputTokens: 90, outputTokens: 8 }, requestId: 'longcat-exam',
+            }));
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('LongCat 提取失败时不把可能回显的图片或学生答案写入日志', async () => {
+        const privateContent = '私密图片和学生答案';
+        const fetchMock = vi.fn().mockResolvedValue(new Response(privateContent, { status: 400 }));
+        vi.stubGlobal('fetch', fetchMock);
+        try {
+            const provider = new OpenAIProvider({ apiKey: 'test-key', model: 'LongCat-Flash', baseUrl: 'https://api.longcat.chat/openai/v1' });
+            await expect(provider.extractExamPageAnswers({
+                imageBase64: 'QUJD', mimeType: 'image/png', language: 'zh', questions: [],
+            })).rejects.toThrow();
+            expect(fetchMock).toHaveBeenCalledOnce();
+            const logs = JSON.stringify(Object.values(mockLogger).flatMap((method) => method.mock.calls));
+            expect(logs).not.toContain(privateContent);
         } finally {
             vi.unstubAllGlobals();
         }

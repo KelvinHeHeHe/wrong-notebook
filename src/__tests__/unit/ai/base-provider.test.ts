@@ -1,14 +1,13 @@
 /**
  * BaseAIProvider 单元测试
  *
- * 用最小测试子类验证：14 个业务方法调用 complete 时传入的 task/system/user/image 正确；
+ * 用最小测试子类验证：业务方法调用 complete 时传入的 task/system/user/image 正确；
  * 空响应抛错；异常经 handleError 后抛出。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/lib/logger', () => ({
-    createLogger: vi.fn(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), box: vi.fn(), divider: vi.fn() })),
-}));
+const mockLogger = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), box: vi.fn(), divider: vi.fn() }));
+vi.mock('@/lib/logger', () => ({ createLogger: vi.fn(() => mockLogger) }));
 
 vi.mock('@/lib/config', () => ({
     getAppConfig: vi.fn(() => ({ aiProvider: 'test', prompts: {} })),
@@ -72,6 +71,8 @@ function defaultResponseFor(task: CompletionRequest['task']): string {
             return '{"questions":[]}';
         case 'text-fix':
             return '{"questions":[{"id":"q1","text":"修正后","uncertain":[]}]}';
+        case 'exam-answer-extraction':
+            return '{"candidates":[]}';
     }
 }
 
@@ -80,6 +81,48 @@ describe('BaseAIProvider', () => {
 
     beforeEach(() => {
         provider = new TestProvider();
+    });
+
+    describe('extractExamPageAnswers', () => {
+        const input = {
+            imageBase64: '私密图片', mimeType: 'image/png', language: 'zh' as const,
+            questions: [{ id: 'q1', displayNumber: 1, sourceShortId: 'ABC123', questionText: '私密候选题全文' }],
+        };
+
+        it('发送图片并使用固定 completion task，返回解析后的候选', async () => {
+            await expect(provider.extractExamPageAnswers(input)).resolves.toEqual({ candidates: [] });
+            expect(provider.completeText).toHaveBeenCalledWith(expect.objectContaining({
+                task: 'exam-answer-extraction', image: { base64: '私密图片', mimeType: 'image/png' },
+            }));
+            expect(JSON.parse(provider.completeText.mock.calls[0][0].user).data.questions[0].questionText).toBe('私密候选题全文');
+        });
+
+        it.each([
+            ['network unreachable', 'AI_CONNECTION_FAILED'],
+            ['429 rate limit exceeded', 'AI_QUOTA_EXCEEDED'],
+            ['vision image input not supported', 'AI_IMAGE_NOT_SUPPORTED'],
+            ['AI_OUTPUT_TRUNCATED', 'AI_OUTPUT_TRUNCATED'],
+        ])('传输错误按统一错误码归类：%s', async (message, code) => {
+            provider.completeText.mockRejectedValue(new Error(message));
+            await expect(provider.extractExamPageAnswers(input)).rejects.toThrow(code);
+        });
+
+        it('非法响应按响应错误归类，成功和失败日志均不泄露答案或输入', async () => {
+            const privateAnswer = '私密学生答案';
+            provider.completeText.mockResolvedValue(JSON.stringify({ candidates: [{
+                sourceShortId: null, displayNumber: null, recognizedAnswer: privateAnswer,
+                notAttempted: false, confidence: 0.5, regions: [],
+            }] }));
+            await provider.extractExamPageAnswers(input);
+            provider.completeText.mockResolvedValue(privateAnswer);
+            await expect(provider.extractExamPageAnswers(input)).rejects.toThrow('AI_RESPONSE_ERROR');
+            provider.completeText.mockRejectedValue(new Error('network ' + privateAnswer + input.imageBase64));
+            await expect(provider.extractExamPageAnswers(input)).rejects.toThrow('AI_CONNECTION_FAILED');
+            const logs = JSON.stringify(Object.values(mockLogger).flatMap((method) => method.mock.calls));
+            expect(logs).not.toContain(privateAnswer);
+            expect(logs).not.toContain(input.imageBase64);
+            expect(logs).not.toContain(input.questions[0].questionText);
+        });
     });
 
     describe('analyzeImage', () => {

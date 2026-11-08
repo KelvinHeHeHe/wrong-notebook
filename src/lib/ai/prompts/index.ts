@@ -16,3 +16,4 @@ export * from './grading';
 export * from './tag-suggest';
 export * from './question-split';
 export * from './text-fix';
+export * from './exam-answer-extraction';

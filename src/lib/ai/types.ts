@@ -34,6 +34,8 @@ import type { FigureResult } from './schema';
 export type { QuestionSplitInput, QuestionSplitResult, SplitQuestion } from './question-split';
 import type { QuestionSplitInput, QuestionSplitResult } from './question-split';
 import type { TextFixInput, TextFixResult } from './text-fix';
+export type { ExamPageAnswerExtractionInput, ExamPageAnswerCandidate, ExamPageAnswerExtractionResult } from './exam-answer-extraction';
+import type { ExamPageAnswerExtractionInput, ExamPageAnswerExtractionResult } from './exam-answer-extraction';
 
 export interface GeogebraAnalysisResult {
     suitable: boolean;
@@ -129,6 +131,8 @@ export interface AIService {
     splitQuestions(input: QuestionSplitInput): Promise<QuestionSplitResult>;
     /** 修正题目文字：删去混入的草稿、修正 OCR 错字，数字和算式保持原样 */
     fixQuestionText(input: TextFixInput): Promise<TextFixResult>;
+    /** 仅提取整页图片中可见的学生答案，不评分、不补写答案。 */
+    extractExamPageAnswers(input: ExamPageAnswerExtractionInput): Promise<ExamPageAnswerExtractionResult>;
 }
 
 export interface AIConfig {

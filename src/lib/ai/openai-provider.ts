@@ -138,9 +138,9 @@ export class OpenAIProvider extends BaseAIProvider implements AIService {
             }
         }
 
-        // LongCat 的多模态格式与 OpenAI 不同，analyze 和 question-split 任务绕过 SDK 直接请求
+        // LongCat 的多模态格式与 OpenAI 不同，图片识别任务绕过 SDK 直接请求
         const useLongCatFetch = request.image && this.isLongCat &&
-            (request.task === 'analyze' || request.task === 'question-split');
+            (request.task === 'analyze' || request.task === 'question-split' || request.task === 'exam-answer-extraction');
 
         if (useLongCatFetch) {
             const messages: LongCatMessage[] = [systemMessage, { role: "user", content: userContent }];
@@ -162,7 +162,8 @@ export class OpenAIProvider extends BaseAIProvider implements AIService {
 
                 if (!res.ok) {
                     const errBody = await res.text();
-                    logger.error({ status: res.status, body: errBody }, 'LongCat API error');
+                    // 答案提取的上游错误可能回显学生作答或图片，日志只保留状态码。
+                    logger.error(request.task === 'exam-answer-extraction' ? { status: res.status } : { status: res.status, body: errBody }, 'LongCat API error');
                     throw new Error(`${res.status} status code (${errBody})`);
                 }
 

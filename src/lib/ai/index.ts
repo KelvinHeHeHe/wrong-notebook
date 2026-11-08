@@ -124,7 +124,7 @@ function callMethod(service: AIService, method: string, args: unknown[]): Promis
 
 /** 本次方法调用是否走图片输入：决定使用识别渠道还是文本渠道 */
 function methodRole(method: string, args: unknown[]): AiRouteRole {
-    if (method === 'analyzeImage' || method === 'generateFigureSvg') return 'vision';
+    if (method === 'analyzeImage' || method === 'generateFigureSvg' || method === 'extractExamPageAnswers') return 'vision';
     if (method === 'splitQuestions') {
         const input = args[0] as { kind?: string } | undefined;
         return input?.kind === 'image' ? 'vision' : 'text';

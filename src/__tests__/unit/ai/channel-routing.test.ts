@@ -89,6 +89,7 @@ describe('routeRole', () => {
         expect(routeRole('analyze')).toBe('vision');
         expect(routeRole('figure')).toBe('vision');
         expect(routeRole('split')).toBe('vision');
+        expect(routeRole('exam-answer-extraction')).toBe('vision');
         expect(routeRole('grading')).toBe('text');
         expect(routeRole('similar')).toBe('text');
     });
@@ -100,6 +101,19 @@ describe('routeRole', () => {
 });
 
 describe('getAIService 渠道分工', () => {
+    it('试卷答案提取始终使用视觉渠道并随请求发送图片', async () => {
+        mocks.getAppConfig.mockReturnValue(baseConfig({ routing: { vision: 'glm', text: 'deepseek' } }));
+        mocks.create.mockResolvedValue(reply('{"candidates":[]}'));
+        const ai = await getAIService({ userId: 'u1', kind: 'grade' });
+        await expect(ai.extractExamPageAnswers({
+            imageBase64: 'QUJD', mimeType: 'image/png', language: 'zh', questions: [],
+        })).resolves.toEqual({ candidates: [] });
+        expect(mocks.openaiOptions).toEqual([expect.objectContaining({ apiKey: 'glm-key' })]);
+        expect(mocks.create.mock.calls[0][0].messages[1].content).toEqual(expect.arrayContaining([
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } },
+        ]));
+    });
+
     it('文本分析使用文本渠道，识别使用识别渠道', async () => {
         mocks.getAppConfig.mockReturnValue(baseConfig({ routing: { vision: 'glm', text: 'deepseek' } }));
 
