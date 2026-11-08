@@ -81,6 +81,33 @@ function expectConstraints() {
         .toEqual(expect.arrayContaining(['ErrorItem_shortId_key', 'ErrorItem_userId_createdAt_idx', 'ErrorItem_subjectId_idx']));
     expect(database!.prepare('PRAGMA index_list("PaperGroup")').all().map((index) => index.name))
         .toEqual(expect.arrayContaining(['PaperGroup_userId_key_key', 'PaperGroup_userId_name_key', 'PaperGroup_userId_order_idx']));
+    expect(database!.prepare('PRAGMA index_list("PracticeRecord")').all().map((index) => index.name))
+        .toEqual(expect.arrayContaining(['PracticeRecord_examAttemptId_idx', 'PracticeRecord_examAttemptId_examQuestionId_key']));
+    expect(database!.prepare('PRAGMA index_list("ExamPaper")').all().map((index) => index.name))
+        .toContain('ExamPaper_subjectId_idx');
+    expect(database!.prepare('PRAGMA index_list("ExamPaperPage")').all().map((index) => index.name))
+        .toEqual(expect.arrayContaining(['ExamPaperPage_paperId_role_order_key', 'ExamPaperPage_paperId_order_idx']));
+    expect(database!.prepare('PRAGMA index_list("ExamAttempt")').all().map((index) => index.name))
+        .toEqual(expect.arrayContaining(['ExamAttempt_userId_takenAt_idx', 'ExamAttempt_paperId_takenAt_idx']));
+    expect(database!.prepare('PRAGMA index_list("ExamAttemptPage")').all().map((index) => index.name))
+        .toContain('ExamAttemptPage_attemptId_order_key');
+    expect(database!.prepare('PRAGMA index_list("ExamAttemptAnswer")').all().map((index) => index.name))
+        .toEqual(expect.arrayContaining(['ExamAttemptAnswer_attemptId_examQuestionId_key', 'ExamAttemptAnswer_attemptId_reviewStatus_idx']));
+
+    expect(database!.prepare('PRAGMA foreign_key_list("ExamPaperPage")').all())
+        .toContainEqual(expect.objectContaining({ table: 'ExamPaper', from: 'paperId', on_delete: 'CASCADE' }));
+    expect(database!.prepare('PRAGMA foreign_key_list("ExamAttempt")').all())
+        .toEqual(expect.arrayContaining([
+            expect.objectContaining({ table: 'User', from: 'userId', on_delete: 'CASCADE' }),
+            expect.objectContaining({ table: 'ExamPaper', from: 'paperId', on_delete: 'CASCADE' }),
+        ]));
+    expect(database!.prepare('PRAGMA foreign_key_list("ExamAttemptPage")').all())
+        .toContainEqual(expect.objectContaining({ table: 'ExamAttempt', from: 'attemptId', on_delete: 'CASCADE' }));
+    expect(database!.prepare('PRAGMA foreign_key_list("ExamAttemptAnswer")').all())
+        .toEqual(expect.arrayContaining([
+            expect.objectContaining({ table: 'ExamAttempt', from: 'attemptId', on_delete: 'CASCADE' }),
+            expect.objectContaining({ table: 'ExamQuestion', from: 'examQuestionId', on_delete: 'CASCADE' }),
+        ]));
 }
 
 beforeEach(() => {
@@ -115,7 +142,31 @@ describe('真实 Prisma 数据库迁移', () => {
                 expect.objectContaining({ name: 'figureScale', dflt_value: '100' }),
                 expect.objectContaining({ name: 'figureAlign', dflt_value: "'center'" }),
                 expect.objectContaining({ name: 'answerSpacePx', notnull: 0, dflt_value: null }),
+                expect.objectContaining({ name: 'externalNumber', notnull: 0, dflt_value: null }),
+                expect.objectContaining({ name: 'pageNumber', notnull: 0, dflt_value: null }),
+                expect.objectContaining({ name: 'regionJson', notnull: 0, dflt_value: null }),
+                expect.objectContaining({ name: 'recognitionConfidence', notnull: 0, dflt_value: null }),
             ]));
+        expect(database!.prepare('PRAGMA table_info("ExamPaper")').all())
+            .toEqual(expect.arrayContaining([
+                expect.objectContaining({ name: 'origin', notnull: 1, dflt_value: "'generated'" }),
+                expect.objectContaining({ name: 'subjectId', notnull: 0, dflt_value: null }),
+                expect.objectContaining({ name: 'gradeSemester', notnull: 0, dflt_value: null }),
+                expect.objectContaining({ name: 'examType', notnull: 0, dflt_value: null }),
+                expect.objectContaining({ name: 'examDate', notnull: 0, dflt_value: null }),
+                expect.objectContaining({ name: 'totalScore', notnull: 0, dflt_value: null }),
+                expect.objectContaining({ name: 'sourceFileName', notnull: 0, dflt_value: null }),
+            ]));
+        expect(database!.prepare('PRAGMA table_info("PracticeRecord")').all())
+            .toContainEqual(expect.objectContaining({ name: 'examAttemptId', notnull: 0, dflt_value: null }));
+        expect(['ExamPaperPage', 'ExamAttempt', 'ExamAttemptPage', 'ExamAttemptAnswer'].map((table) =>
+            database!.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table),
+        )).toEqual([
+            { name: 'ExamPaperPage' },
+            { name: 'ExamAttempt' },
+            { name: 'ExamAttemptPage' },
+            { name: 'ExamAttemptAnswer' },
+        ]);
         closeDatabase();
 
         expect(() => execFileSync(process.execPath, [resolve('node_modules/prisma/build/index.js'), 'migrate', 'diff',
@@ -135,8 +186,31 @@ describe('真实 Prisma 数据库迁移', () => {
             // 新增的 AI 数据授权列：旧用户升级后为空，需重新授权
             if (table === 'User') return { ...row, aiDataConsentAt: row.aiDataConsentAt ?? null };
             if (table === 'Subject' || table === 'KnowledgeTag') return { ...row, tagSet: row.tagSet ?? 'default' };
-            if (table === 'ExamQuestion') return { ...row, figureScale: row.figureScale ?? 100, figureAlign: row.figureAlign ?? 'center', answerSpacePx: null, score: null, questionType: null };
-            if (table === 'ExamPaper') return { ...row, mode: row.mode ?? 'generate', groupByType: row.groupByType ?? 0 };
+            if (table === 'PracticeRecord') return { ...row, examAttemptId: null };
+            if (table === 'ExamQuestion') return {
+                ...row,
+                figureScale: row.figureScale ?? 100,
+                figureAlign: row.figureAlign ?? 'center',
+                answerSpacePx: null,
+                score: null,
+                questionType: null,
+                externalNumber: null,
+                pageNumber: null,
+                regionJson: null,
+                recognitionConfidence: null,
+            };
+            if (table === 'ExamPaper') return {
+                ...row,
+                mode: row.mode ?? 'generate',
+                groupByType: row.groupByType ?? 0,
+                origin: 'generated',
+                subjectId: null,
+                gradeSemester: null,
+                examType: null,
+                examDate: null,
+                totalScore: null,
+                sourceFileName: null,
+            };
             return row;
         }));
         closeDatabase();

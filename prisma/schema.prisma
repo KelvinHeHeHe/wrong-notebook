@@ -40,6 +40,7 @@ model User {
   practiceRecords PracticeRecord[]
   customTags KnowledgeTag[] // User's custom tags
   examPapers ExamPaper[]
+  examAttempts ExamAttempt[]
   aiUsages   AiUsage[]
   aiCompletions AiCompletion[]
   paperGroups PaperGroup[]
@@ -221,11 +222,15 @@ model PracticeRecord {
   // 试卷题目可多次录入结果，每次一条记录
   examQuestionId String?
   examQuestion   ExamQuestion? @relation(fields: [examQuestionId], references: [id], onDelete: SetNull)
+  // 增量迁移保持旧表不重建，因此此批仅保存关联 ID；写入侧校验归属与存在性。
+  examAttemptId String?
   
   createdAt DateTime @default(now())
 
   @@index([errorItemId, createdAt])
   @@index([examQuestionId])
+  @@index([examAttemptId])
+  @@unique([examAttemptId, examQuestionId])
   @@index([userId, createdAt])
 }
 
@@ -245,13 +250,24 @@ model ExamPaper {
   subjectIds String   // JSON 数组
   tagNames   String?  // JSON 数组
   resultsRecordedAt DateTime?
+  origin     String   @default("generated") // generated 现有组卷 | imported 外部整卷
+  // subjectId 为主学科快照；为避免 SQLite 重建旧表，本批不添加数据库外键。
+  subjectId  String?
+  gradeSemester String?
+  examType   String?
+  examDate   DateTime?
+  totalScore Float?
+  sourceFileName String?
 
   questions  ExamQuestion[]
+  pages      ExamPaperPage[]
+  attempts   ExamAttempt[]
 
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   @@index([userId, createdAt])
+  @@index([subjectId])
 }
 
 model ExamQuestion {
@@ -273,11 +289,98 @@ model ExamQuestion {
   score         Float?     // 每题分值（最多一位小数，0~1000），空表示未设分值
   // 创建时从来源错题快照的题型；旧数据为 null，分组时回退读取关联错题当前题型
   questionType  String?
+  externalNumber String?
+  pageNumber     Int?
+  regionJson     String?
+  recognitionConfidence Float?
   error         String?
   practiceRecordId String? // [DEPRECATED] 旧版一对一关联，部署校验要求保留已有列，改用 PracticeRecord.examQuestionId
   practiceRecords PracticeRecord[]
+  attemptAnswers ExamAttemptAnswer[]
 
   @@index([paperId, order])
+}
+
+// 外部整卷的本地页面快照
+model ExamPaperPage {
+  id        String    @id @default(cuid())
+  paperId   String
+  paper     ExamPaper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  order     Int
+  role      String    @default("questions") // questions | answer_key
+  imageData String
+  mimeType  String
+  width     Int?
+  height    Int?
+  checksum  String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([paperId, role, order])
+  @@index([paperId, order])
+}
+
+// 一份试卷的一次真实纸质作答
+model ExamAttempt {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paperId     String
+  paper       ExamPaper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  status      String    @default("uploaded") // uploaded | recognizing | review | confirmed | failed
+  takenAt     DateTime
+  totalScore  Float?
+  maxScore    Float?
+  comment     String?
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  pages       ExamAttemptPage[]
+  answers     ExamAttemptAnswer[]
+
+  @@index([userId, takenAt])
+  @@index([paperId, takenAt])
+}
+
+// 纸质作答回传的本地页面
+model ExamAttemptPage {
+  id        String      @id @default(cuid())
+  attemptId String
+  attempt   ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  order     Int
+  imageData String
+  mimeType  String
+  width     Int?
+  height    Int?
+  checksum  String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([attemptId, order])
+}
+
+// AI 识别后、人工确认前的逐题评分草稿
+model ExamAttemptAnswer {
+  id               String       @id @default(cuid())
+  attemptId        String
+  attempt          ExamAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  examQuestionId   String
+  examQuestion     ExamQuestion @relation(fields: [examQuestionId], references: [id], onDelete: Cascade)
+  recognizedAnswer String?
+  result           String?      // correct | wrong | not_attempted；草稿可空
+  awardedScore     Float?
+  maxScore         Float?
+  gradingSource    String?      // ai | manual
+  gradingReason    String?
+  confidence       Float?
+  reviewStatus     String       @default("pending") // pending | required | reviewed
+  regionJson       String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([attemptId, examQuestionId])
+  @@index([attemptId, reviewStatus])
 }
 
 // 用户发起的 AI 调用记录，用于每日额度和用量统计（不含后台自动的掌握概率评估）
