@@ -127,6 +127,25 @@ describe('纸质作答按页识别与独立判分', () => {
         expect(JSON.stringify(mocks.log.mock.calls)).not.toMatch(/c2VjcmV0|学生答案全文|秘密题干|标准答案全文/);
     });
 
+    it.each([
+        ['AI_IMAGE_NOT_SUPPORTED', 'AI_IMAGE_NOT_SUPPORTED'],
+        ['AI_OUTPUT_TRUNCATED', 'AI_OUTPUT_TRUNCATED'],
+        ['network unavailable', 'AI_CONNECTION_FAILED'],
+        ['request timeout', 'AI_TIMEOUT_ERROR'],
+        ['403 forbidden', 'AI_PERMISSION_DENIED'],
+        ['unrecognized provider failure', 'AI_UNKNOWN_ERROR'],
+    ])('提取错误 %s 在信封与 API 中稳定归类且日志脱敏', async (message, expected) => {
+        mocks.extract.mockRejectedValueOnce(new Error(message + ' 学生答案全文 秘密题干 c2VjcmV01'));
+        const response = await run({ pageOrders: [1] });
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body).toMatchObject({ successes: [], failures: [{ pageOrder: 1, error: expected }], status: 'failed' });
+        expect(JSON.parse(state.pages[0].recognitionResult!)).toMatchObject({ status: 'failed', errorCode: expected });
+        const logs = JSON.stringify(mocks.log.mock.calls, (_key, value: unknown) => value instanceof Error ? { message: value.message, stack: value.stack, cause: value.cause } : value);
+        expect(logs).not.toMatch(/学生答案全文|秘密题干|c2VjcmV01/);
+        expect(JSON.stringify(body)).not.toMatch(/学生答案全文|秘密题干|c2VjcmV01/);
+    });
+
     it.each([false, true])('按实际打印布局匹配题号，包含过滤、零基 order 和题型回退：group=%s', async (groupByType) => {
         state.paper.groupByType = groupByType;
         state.paper.questions = [

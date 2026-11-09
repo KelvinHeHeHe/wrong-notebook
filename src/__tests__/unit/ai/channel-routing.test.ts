@@ -102,6 +102,18 @@ describe('routeRole', () => {
 });
 
 describe('getAIService 渠道分工', () => {
+    it.each([
+        ['AI_IMAGE_NOT_SUPPORTED', true], ['AI_OUTPUT_TRUNCATED', false],
+    ] as const)('提取稳定错误 %s 保持既有备用渠道策略', async (code, fallback) => {
+        mocks.getAppConfig.mockReturnValue(baseConfig({ routing: { vision: 'deepseek', text: 'deepseek', fallback: 'glm' } }));
+        mocks.create.mockRejectedValueOnce(new Error(code)).mockResolvedValueOnce(reply('{"candidates":[]}'));
+        const ai = await getAIService({ userId: 'u1', kind: 'grade' });
+        const result = ai.extractExamPageAnswers({ imageBase64: 'QUJD', mimeType: 'image/png', language: 'zh', questions: [] });
+        if (fallback) await expect(result).resolves.toEqual({ candidates: [] });
+        else await expect(result).rejects.toThrow(code);
+        expect(mocks.create).toHaveBeenCalledTimes(fallback ? 2 : 1);
+        expect(mocks.openaiOptions.map((options) => options.apiKey)).toEqual(fallback ? ['deepseek-key', 'glm-key'] : ['deepseek-key']);
+    });
     it('真实 BaseProvider 判分失败转备用渠道时不记录上游回显和模型答案', async () => {
         mocks.getAppConfig.mockReturnValue(baseConfig({ routing: { text: 'deepseek', fallback: 'glm' } }));
         mocks.create.mockRejectedValueOnce(new Error('429 保密题干 保密学生作答'))

@@ -13,6 +13,8 @@ describe('parseErrorCode', () => {
             'AI_AUTH_ERROR',
             'AI_SERVICE_UNAVAILABLE',
             'AI_UNKNOWN_ERROR',
+            'AI_IMAGE_NOT_SUPPORTED',
+            'AI_OUTPUT_TRUNCATED',
         ])('已含 %s 时原样返回', (code) => {
             expect(parseErrorCode(new Error(`something ${code} happened`))).toBe(code);
         });
@@ -171,6 +173,9 @@ describe('parseErrorCode', () => {
 });
 
 describe('isAIErrorCode', () => {
+    it.each(['AI_IMAGE_NOT_SUPPORTED', 'AI_OUTPUT_TRUNCATED'])('识别已稳定的提取错误码 %s', (code) => {
+        expect(isAIErrorCode(code)).toBe(true);
+    });
     it('识别标准错误码', () => {
         expect(isAIErrorCode('error AI_TIMEOUT_ERROR occurred')).toBe(true);
     });
