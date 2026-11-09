@@ -29,6 +29,8 @@ import { sanitizeFigureSvg } from '@/lib/figure-svg';
 import { embedNarration, sanitizeSvgAnimation } from '@/lib/svg-animation';
 import { encodeMp3 } from '@/lib/tts/mp3';
 import { seedChineseTags } from '@/lib/tags/seed';
+import { importBackupData } from '@/lib/backup/import-writer';
+import { normalizeBackupForImport } from '@/lib/backup/import-parser';
 import { BACKUP_EXTENSIONS } from '@/lib/backup-extensions';
 import type { BackupExtension } from '@/lib/backup-extensions';
 
@@ -66,6 +68,44 @@ async function clearUserData() {
     await database.importBatch.deleteMany({ where: { userId: 'user-1' } });
     await database.reviewSchedule.deleteMany();
     await database.paperGroup.deleteMany({ where: { userId: 'user-1' } });
+}
+
+/** 同卷同日期的两次独立作答，页序、学生答案和考试记录各自不同。 */
+async function createSameDateAttempts(userId = 'user-1', prefix = 'same-date') {
+    const paper = await database.examPaper.create({ data: {
+        id: `${prefix}-paper`, userId, title: '同日双作答备份', status: 'ready', scope: 'all', difficulty: 'medium', requestedCount: 1, subjectIds: '[]', origin: 'imported',
+        createdAt: new Date('2026-11-08T00:00:00Z'),
+        questions: { create: { id: `${prefix}-question`, order: 1, sourceShortId: 'DUAL01', status: 'ready', questionText: '合成双作答题', answerText: '标准解', score: 10 } },
+    } });
+    for (const [index, label] of ['甲', '乙'].entries()) {
+        const attemptId = `${prefix}-attempt-${index}`;
+        await database.examAttempt.create({ data: {
+            id: attemptId, userId, paperId: paper.id, status: 'confirmed', takenAt: new Date('2026-11-09T00:00:00Z'), comment: `作答${label}`, totalScore: 10 - index * 2, maxScore: 10,
+            createdAt: new Date(`2026-11-09T0${index + 1}:00:00Z`),
+            pages: { create: { order: index + 1, imageData: `data:image/png;base64,${index ? 'Yg==' : 'YQ=='}`, mimeType: 'image/png', checksum: `${prefix}-checksum-${index}`, recognitionResult: JSON.stringify({ synthetic: label }) } },
+            answers: { create: { examQuestionId: `${prefix}-question`, recognizedAnswer: `答案${label}`, result: 'correct', awardedScore: 10 - index * 2, maxScore: 10, gradingSource: 'manual', reviewStatus: 'reviewed' } },
+        } });
+        await database.practiceRecord.create({ data: { userId, examAttemptId: attemptId, examQuestionId: `${prefix}-question`, source: 'exam', result: 'correct', isCorrect: true, questionText: '合成双作答题', answerText: '标准解', wrongAnswerText: `答案${label}` } });
+    }
+    return paper;
+}
+
+async function assertSameDateAttempts(userId: string) {
+    const attempts = await database.examAttempt.findMany({ where: { userId, paper: { title: '同日双作答备份' } }, orderBy: { comment: 'asc' }, include: { pages: true, answers: true } });
+    expect(attempts).toHaveLength(2);
+    for (const [index, label] of ['乙', '甲'].entries()) {
+        const attempt = attempts[index];
+        expect(attempt.comment).toBe(`作答${label}`);
+        expect(attempt.pages).toEqual([expect.objectContaining({ order: label === '甲' ? 1 : 2, recognitionResult: JSON.stringify({ synthetic: label }) })]);
+        expect(attempt.answers).toEqual([expect.objectContaining({ recognizedAnswer: `答案${label}`, result: 'correct' })]);
+        expect(await database.practiceRecord.findMany({ where: { userId, examAttemptId: attempt.id } })).toEqual([expect.objectContaining({ examQuestionId: attempt.answers[0].examQuestionId, errorItemId: null, source: 'exam', result: 'correct', wrongAnswerText: `答案${label}` })]);
+    }
+    return attempts;
+}
+
+async function importForTarget(backup: Parameters<typeof normalizeBackupForImport>[0], userId: string, importAll = false) {
+    const user = await database.user.findUniqueOrThrow({ where: { id: userId } });
+    return database.$transaction((tx) => importBackupData({ tx, user, importAll, normalized: normalizeBackupForImport(backup, false) }));
 }
 
 beforeAll(() => {
@@ -430,6 +470,113 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         }
         await importBackup(backup);
         expect(await database.practiceRecord.count({ where: { examAttemptId: restored.id, examQuestionId: question.id } })).toBe(1);
+    });
+
+    it.each([13, 12])('v%i 同卷同日期双作答完整往返，重导及再次导出不合并或重复', async (version) => {
+        await createSameDateAttempts();
+        const backup = await exportBackup();
+        backup.version = version;
+        if (version === 12) for (const page of backup.examAttemptPages) delete page.recognitionResult;
+        await clearUserData();
+        expect((await importBackup(backup)).stats.examAttemptsCreated).toBe(2);
+        const restored = version === 13 ? await assertSameDateAttempts('user-1') : await database.examAttempt.findMany({ where: { userId: 'user-1' } });
+        expect(restored).toHaveLength(2);
+        if (version === 12) {
+            expect(await database.examAttemptPage.count()).toBe(2);
+            expect(await database.examAttemptPage.count({ where: { recognitionResult: null } })).toBe(2);
+            expect(await database.examAttemptAnswer.count()).toBe(2);
+            expect(await database.practiceRecord.count({ where: { examAttemptId: { not: null } } })).toBe(2);
+        }
+        expect((await importBackup(backup)).stats).toMatchObject({ examAttemptsCreated: 0, examAttemptPagesCreated: 0, examAttemptAnswersCreated: 0 });
+        expect((await database.examAttempt.findMany()).map((item) => item.id).sort()).toEqual(restored.map((item) => item.id).sort());
+        expect((await importBackup(await exportBackup())).stats.examAttemptsCreated).toBe(0);
+    });
+
+    it('同日双作答跨两个目标账户独立恢复，原账户不变且各目标重复导入幂等', async () => {
+        await createSameDateAttempts();
+        const backup = await exportBackup();
+        const source = await assertSameDateAttempts('user-1');
+        for (const id of ['target-a', 'target-b']) {
+            await database.user.create({ data: { id, email: `${id}@example.test`, password: 'test-only' } });
+            expect((await importForTarget(backup, id)).stats.examAttemptsCreated).toBe(2);
+            const restored = await assertSameDateAttempts(id);
+            expect(restored.map((item) => item.id).some((id) => source.some((item) => item.id === id))).toBe(false);
+            expect((await importForTarget(backup, id)).stats.examAttemptsCreated).toBe(0);
+            expect(await database.examAttempt.count({ where: { userId: id } })).toBe(2);
+        }
+        expect(await database.examAttempt.count()).toBe(6);
+        expect((await assertSameDateAttempts('user-1')).map((item) => item.id)).toEqual(source.map((item) => item.id));
+    });
+
+    it('importAll 同日双作答按来源用户隔离恢复，重复导入仍各两份', async () => {
+        await database.user.create({ data: { id: 'user-2', email: 'all-other@example.test', password: 'test-only' } });
+        await createSameDateAttempts();
+        await createSameDateAttempts('user-2', 'other-same-date');
+        const role = mocks.session.user.role;
+        mocks.session.user.role = 'admin';
+        let backup;
+        try { backup = await (await EXPORT(new Request('http://localhost/api/export?all=true'))).json(); }
+        finally { mocks.session.user.role = role; }
+        await database.practiceRecord.deleteMany();
+        await database.examPaper.deleteMany();
+        expect((await importForTarget(backup, 'user-1', true)).stats.examAttemptsCreated).toBe(4);
+        await assertSameDateAttempts('user-1');
+        await assertSameDateAttempts('user-2');
+        expect((await importForTarget(backup, 'user-1', true)).stats.examAttemptsCreated).toBe(0);
+        expect(await database.examAttempt.count()).toBe(4);
+    });
+
+    it('旧导入随机 ID 候选每次只能认领一次，不能把新建的同日作答再次当旧记录', async () => {
+        await createSameDateAttempts();
+        const backup = await exportBackup();
+        await database.examAttempt.update({ where: { id: 'same-date-attempt-0' }, data: { id: 'legacy-random-attempt' } });
+        await database.practiceRecord.updateMany({ where: { examAttemptId: 'same-date-attempt-0' }, data: { examAttemptId: 'legacy-random-attempt' } });
+        await database.practiceRecord.deleteMany({ where: { examAttemptId: 'same-date-attempt-1' } });
+        await database.examAttempt.delete({ where: { id: 'same-date-attempt-1' } });
+        expect((await importBackup(backup)).stats.examAttemptsCreated).toBe(1);
+        expect((await assertSameDateAttempts('user-1')).map((item) => item.id)).toContain('legacy-random-attempt');
+        expect((await importBackup(backup)).stats.examAttemptsCreated).toBe(0);
+        await assertSameDateAttempts('user-1');
+    });
+
+    it('来源 ID 与派生 ID 被别的用户或试卷占用时不映射越权，备用身份重导稳定', async () => {
+        await createSameDateAttempts();
+        const backup = await exportBackup();
+        await clearUserData();
+        await importBackup(backup);
+        const restored = await database.examAttempt.findMany({ where: { userId: 'user-1' }, orderBy: { comment: 'asc' } });
+        expect(restored).toHaveLength(2);
+        const paperId = restored[0].paperId;
+        await database.practiceRecord.deleteMany({ where: { examAttemptId: { in: restored.map((item) => item.id) } } });
+        await database.examAttempt.deleteMany({ where: { paperId } });
+        await database.user.create({ data: { id: 'foreign-owner', email: 'foreign-owner@example.test', password: 'test-only' } });
+        const foreignPaper = await database.examPaper.create({ data: { userId: 'foreign-owner', title: '其他账户试卷', status: 'ready', scope: 'all', difficulty: 'medium', requestedCount: 1, subjectIds: '[]' } });
+        const wrongPaper = await database.examPaper.create({ data: { userId: 'user-1', title: '另一张试卷', status: 'ready', scope: 'all', difficulty: 'medium', requestedCount: 1, subjectIds: '[]' } });
+        await database.examAttempt.createMany({ data: [
+            { id: restored[0].id, userId: 'foreign-owner', paperId: foreignPaper.id, takenAt: new Date(), comment: '其他账户不可改' },
+            { id: restored[1].id, userId: 'user-1', paperId: wrongPaper.id, takenAt: new Date(), comment: '其他试卷不可改' },
+            { id: 'same-date-attempt-0', userId: 'foreign-owner', paperId: foreignPaper.id, takenAt: new Date(), comment: '来源 ID 冲突' },
+        ] });
+        expect((await importBackup(backup)).stats.examAttemptsCreated).toBe(2);
+        const actual = await assertSameDateAttempts('user-1');
+        expect(actual.every((item) => item.paperId === paperId && !restored.some((old) => old.id === item.id))).toBe(true);
+        expect((await importBackup(backup)).stats.examAttemptsCreated).toBe(0);
+        expect(await database.examAttempt.count({ where: { userId: 'foreign-owner' } })).toBe(2);
+        expect((await database.examAttempt.findUniqueOrThrow({ where: { id: restored[1].id } })).comment).toBe('其他试卷不可改');
+        // 冲突记录后来删除，也必须找到已使用的备用身份，不再创建另一份。
+        await database.examAttempt.deleteMany({ where: { id: { in: restored.map((item) => item.id) } } });
+        expect((await importBackup(backup)).stats.examAttemptsCreated).toBe(0);
+        expect((await assertSameDateAttempts('user-1')).map((item) => item.id)).toEqual(actual.map((item) => item.id));
+    });
+
+    it('重复来源作答 ID 的冲突声明不建立页面或评分关联', async () => {
+        await createSameDateAttempts();
+        const backup = await exportBackup();
+        backup.examAttempts[1].id = backup.examAttempts[0].id;
+        await clearUserData();
+        expect((await importBackup(backup)).stats.examAttemptsCreated).toBe(0);
+        expect(await database.examAttemptPage.count()).toBe(0);
+        expect(await database.examAttemptAnswer.count()).toBe(0);
     });
 
     it('v12 导入跳过跨试卷的逐题评分，同时保留同一次作答中的合法评分', async () => {

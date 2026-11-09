@@ -1,6 +1,7 @@
 /**
  * 导入步骤：外部试卷页、纸质作答、回传页与逐题评分。
  */
+import { createAttemptIdentityResolver } from './attempt-identity';
 import type { ImportContext } from './types';
 
 function isId(value: unknown): value is string {
@@ -47,6 +48,8 @@ export async function importExamAttempts(ctx: ImportContext): Promise<void> {
         examPaperIdMap, examPaperOwnerMap,
         examAttemptIdMap, examAttemptOwnerMap, examAttemptPaperMap,
     } = ctx;
+    if (!normalized.examAttempts.length) return;
+    const resolveIdentity = await createAttemptIdentityResolver(tx, normalized.examAttempts, [...examPaperIdMap.values()]);
     for (const attempt of normalized.examAttempts) {
         const { raw } = attempt;
         if (!isId(raw.id) || !isId(raw.paperId) || !attempt.takenAt) continue;
@@ -54,12 +57,10 @@ export async function importExamAttempts(ctx: ImportContext): Promise<void> {
         const paperId = examPaperIdMap.get(raw.paperId);
         if (!paperId || examPaperOwnerMap.get(raw.paperId) !== targetUserId) continue;
 
-        const existing = await tx.examAttempt.findFirst({
-            where: { userId: targetUserId, paperId, takenAt: attempt.takenAt },
-            select: { id: true },
-        });
-        if (existing) {
-            examAttemptIdMap.set(raw.id, existing.id);
+        const identity = await resolveIdentity({ sourceId: raw.id, userId: targetUserId, paperId, takenAt: attempt.takenAt });
+        if (!identity) continue;
+        if (identity.existing) {
+            examAttemptIdMap.set(raw.id, identity.id);
             examAttemptOwnerMap.set(raw.id, targetUserId);
             examAttemptPaperMap.set(raw.id, paperId);
             continue;
@@ -67,6 +68,7 @@ export async function importExamAttempts(ctx: ImportContext): Promise<void> {
 
         const created = await tx.examAttempt.create({
             data: {
+                id: identity.id,
                 userId: targetUserId,
                 paperId,
                 status: attempt.status,

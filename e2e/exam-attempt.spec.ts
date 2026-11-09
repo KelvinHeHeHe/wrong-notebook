@@ -103,6 +103,14 @@ for (const mobile of [false, true]) {
         expect(await scenario.db.errorItem.count({ where: { userId: scenario.user.id } })).toBe(4);
         expect((await scenario.model()).calls).toHaveLength(callsBefore);
 
+        // 备份夹具：同一张试卷、同一作答日期仍是第二次独立作答。
+        const secondAttempt = await scenario.db.examAttempt.create({ data: {
+            userId: scenario.user.id, paperId: paper.id, takenAt: confirmed.takenAt, status: 'confirmed', comment: '同日第二份作答', totalScore: 50, maxScore: 50, confirmedAt: new Date(),
+            pages: { create: { order: 3, imageData: confirmed.pages[0].imageData, mimeType: confirmed.pages[0].mimeType, checksum: confirmed.pages[0].checksum, recognitionResult: confirmed.pages[0].recognitionResult } },
+            answers: { create: confirmed.answers.map((answer) => ({ examQuestionId: answer.examQuestionId, recognizedAnswer: '同日第二份答案', result: 'correct', awardedScore: 10, maxScore: 10, gradingSource: 'manual', reviewStatus: 'reviewed' })) },
+        } });
+        for (const question of questions) await scenario.db.practiceRecord.create({ data: { userId: scenario.user.id, examAttemptId: secondAttempt.id, examQuestionId: question.id, errorItemId: question.errorItemId, source: 'exam', result: 'correct', isCorrect: true, questionText: question.questionText, wrongAnswerText: '同日第二份答案' } });
+
         await page.goto('/');
         const settings = await openSettings(page, '危险');
         const downloaded = page.waitForEvent('download');
@@ -123,7 +131,8 @@ for (const mobile of [false, true]) {
         await acceptConfirmDialog(page);
         expect((await imported).ok()).toBeTruthy();
         await reloaded;
-        const restored = await scenario.db.examAttempt.findFirstOrThrow({ where: { userId: scenario.user.id }, include: { answers: true, pages: { orderBy: { order: 'asc' } }, paper: { include: { questions: true } } } });
+        const restored = await scenario.db.examAttempt.findFirstOrThrow({ where: { userId: scenario.user.id, comment: null }, include: { answers: true, pages: { orderBy: { order: 'asc' } }, paper: { include: { questions: true } } } });
+        expect(await scenario.db.examAttempt.count({ where: { userId: scenario.user.id, paperId: restored.paperId, takenAt: restored.takenAt } })).toBe(2);
         expect(restored).toMatchObject({ status: 'confirmed', totalScore: 17, maxScore: 50 });
         expect(restored.pages.map((item) => ({ imageData: item.imageData, recognitionResult: item.recognitionResult }))).toEqual(confirmed.pages.map((item) => ({ imageData: item.imageData, recognitionResult: item.recognitionResult })));
         expect(restored.answers).toHaveLength(5);
@@ -133,6 +142,14 @@ for (const mobile of [false, true]) {
             expect(answer).toMatchObject({ recognizedAnswer: original.recognizedAnswer, regionJson: original.regionJson, result: original.result, awardedScore: original.awardedScore, reviewStatus: original.reviewStatus });
             expect(await scenario.db.practiceRecord.count({ where: { userId: scenario.user.id, examAttemptId: restored.id, examQuestionId: question.id, errorItemId: question.errorItemId } })).toBe(1);
         }
+        const secondRestored = await scenario.db.examAttempt.findFirstOrThrow({ where: { userId: scenario.user.id, comment: '同日第二份作答' }, include: { pages: true, answers: true } });
+        expect(secondRestored).toMatchObject({ status: 'confirmed', totalScore: 50, maxScore: 50 });
+        expect(secondRestored.pages).toEqual([expect.objectContaining({ order: 3, imageData: confirmed.pages[0].imageData, recognitionResult: confirmed.pages[0].recognitionResult })]);
+        expect(secondRestored.answers).toHaveLength(5);
+        expect(secondRestored.answers.every((answer) => answer.recognizedAnswer === '同日第二份答案')).toBe(true);
+        const secondRecords = await scenario.db.practiceRecord.findMany({ where: { userId: scenario.user.id, examAttemptId: secondRestored.id } });
+        expect(secondRecords).toHaveLength(5);
+        expect(secondRecords.every((record) => record.wrongAnswerText === '同日第二份答案' && record.source === 'exam' && secondRestored.answers.some((answer) => answer.examQuestionId === record.examQuestionId))).toBe(true);
         await page.goto(`/exam-attempts/${restored.id}`);
         await expect(page.getByText('成绩已确认', { exact: true })).toBeVisible();
         await expect(page.getByText('待人工映射答案', { exact: true })).toBeVisible();
