@@ -16,7 +16,7 @@ export const GET = withUser(async (
     try {
         const includePages = new URL(req.url).searchParams.get('includePages') === '1';
         const attempt = await prisma.examAttempt.findUnique({
-            where: { id },
+            where: { id, userId: user.id },
             include: {
                 paper: { select: { id: true, title: true, status: true, origin: true } },
                 answers: { orderBy: { examQuestion: { order: 'asc' } } },

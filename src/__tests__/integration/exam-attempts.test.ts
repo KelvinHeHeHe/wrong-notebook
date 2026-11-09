@@ -165,9 +165,34 @@ describe('纸质试卷作答与页面 API', () => {
         expect(detail.pages[0]).toMatchObject({ id: 'page-1', order: 1, checksum: checksum(1) });
         expect(detail.pages[0]).not.toHaveProperty('imageData');
         const query = mocks.examAttempt.findUnique.mock.calls[0][0];
+        expect(query.where).toEqual({ id: 'attempt-1', userId: 'user-1' });
         expect(query.include.pages.select.imageData).not.toBe(true);
         const withImages = await DETAIL(new Request('http://localhost/api/exam-attempts/attempt-1?includePages=1'), params());
         expect((await withImages.json()).pages[0].imageData).toBe(page(1).imageData);
+        expect(mocks.examAttempt.findUnique.mock.calls[1][0].where).toEqual({ id: 'attempt-1', userId: 'user-1' });
+        expect(mocks.examAttempt.findUnique.mock.calls[1][0].include.pages.select.imageData).toBe(true);
+    });
+
+    it.each(['attempt-1', 'missing-attempt'])('请求带页图的他人或不存在作答 %s 时不加载关联页图', async (targetId) => {
+        const loadRelatedPages = vi.fn();
+        const foreignAttempt = attempt({ userId: 'other-user' });
+        mocks.examAttempt.findUnique.mockImplementation(async ({ where, include }: {
+            where: { id: string; userId?: string };
+            include?: { pages?: unknown };
+        }) => {
+            if (where.id !== foreignAttempt.id || (where.userId !== undefined && where.userId !== foreignAttempt.userId)) return null;
+            // 模拟数据库仅在主记录匹配过滤条件后才读取关联页面。
+            if (include?.pages) loadRelatedPages();
+            return foreignAttempt;
+        });
+
+        const response = await DETAIL(new Request(`http://localhost/api/exam-attempts/${targetId}?includePages=1`), params(targetId));
+
+        expect(response.status).toBe(404);
+        expect(await response.json()).toEqual({ message: 'Exam attempt not found', code: 'NOT_FOUND' });
+        expect(loadRelatedPages).not.toHaveBeenCalled();
+        expect(mocks.examAttempt.findUnique).toHaveBeenCalledTimes(1);
+        expect(mocks.examAttempt.findUnique.mock.calls[0][0].where).toEqual({ id: targetId, userId: 'user-1' });
     });
 
     it.each([null, attempt({ userId: 'other-user' })])('详情不泄露他人资源 %#', async (data) => {
