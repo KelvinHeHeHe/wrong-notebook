@@ -72,6 +72,14 @@ for (const mobile of [false, true]) {
             expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('footer') === null, { x: footer!.x + footer!.width / 2, y: footer!.y + footer!.height / 2 })).toBe(true);
             await modal.getByRole('button', { name: 'Close', exact: true }).click();
         }
+        const confirmBounds = await page.getByRole('button', { name: '确认成绩', exact: true }).boundingBox();
+        expect(confirmBounds).not.toBeNull();
+        await expect(page.locator('[data-background-tasks-floating]')).toBeHidden();
+        await page.locator('main footer').getByRole('button', { name: '后台任务', exact: true }).click();
+        const tasks = page.getByRole('dialog', { name: '后台任务', exact: true });
+        await expect(tasks).toBeVisible();
+        expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('footer') === null, { x: confirmBounds!.x + confirmBounds!.width / 2, y: confirmBounds!.y + confirmBounds!.height / 2 })).toBe(true);
+        await tasks.getByRole('button', { name: 'Close', exact: true }).click();
         await page.getByRole('button', { name: '确认成绩', exact: true }).click();
         await page.waitForURL(`/exams/${paper.id}`);
         await expect(page.getByRole('region', { name: '纸质作答历史' }).getByText('得分：17 / 50', { exact: true })).toBeVisible();

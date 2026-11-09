@@ -16,6 +16,8 @@ import { renderRegion } from '@/lib/image-pipeline';
 const push = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }), useParams: () => ({ id: 'a1' }) }));
 vi.mock('@/lib/api-client', async (original) => ({ ...await original<typeof import('@/lib/api-client')>(), apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn() } }));
+// 任务入口的真实弹层与点击由桌面/移动 E2E 覆盖；此处隔离复核 API 状态。
+vi.mock('@/components/background-tasks-button', () => ({ BackgroundTasksButton: () => null }));
 vi.mock('@/lib/image-pipeline', () => ({ renderRegion: vi.fn() }));
 const region = JSON.stringify({ pageOrder: 2, candidateId: 'used', regions: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.4 }] });
 const candidate = { candidateId: 'free', sourceShortId: null, displayNumber: 99, recognizedAnswer: '候选正文', notAttempted: false, confidence: 0.5, regions: [] };

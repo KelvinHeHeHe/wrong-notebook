@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 
+import { BackgroundTasksButton } from '@/components/background-tasks-button';
 import { AttemptAnswerCard } from '@/components/exam-attempt/attempt-answer-card';
 import { UnmatchedCandidates } from '@/components/exam-attempt/unmatched-candidates';
 import { Button } from '@/components/ui/button';
@@ -62,6 +63,7 @@ export function ExamAttemptReview({ attemptId }: ExamAttemptReviewProps) {
         </section>}
         <footer className="fixed inset-x-0 bottom-[calc(4rem+1px+env(safe-area-inset-bottom))] z-50 border-t bg-background/95 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur md:bottom-0">
             <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-end gap-3">
+                <BackgroundTasksButton inline />
                 {confirmed ? <p role="status">{text.confirmed}</p> : <>
                     <Button type="button" variant="outline" disabled={disabled || !dirty || Object.values(drafts).some((draft) => !validDraft(draft))} onClick={() => void review.saveAll()}>{text.saveAll}</Button>
                     <Button type="button" disabled={!canConfirm} aria-describedby="attempt-confirm-issues" onClick={() => { if (canConfirm) void review.confirm(); }}>{phase === 'confirm' ? text.confirming : text.confirm}</Button>

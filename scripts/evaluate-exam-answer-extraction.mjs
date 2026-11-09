@@ -36,6 +36,9 @@ async function inputs(args) {
         const expectedIds = new Set();
         for (const expected of sample.expected) {
             if (!object(expected) || !ids.has(expected.questionId) || expectedIds.has(expected.questionId) || typeof expected.normalizedAnswer !== 'string' || expected.normalizedAnswer.length > 20000) fail(`第 ${index + 1} 页期望题目未知、重复或答案无效`);
+            if (!Array.isArray(expected.regions) || expected.regions.length < 1 || expected.regions.length > 4 || expected.regions.some((region) => !object(region) ||
+                !['x', 'y', 'width', 'height'].every((key) => typeof region[key] === 'number' && Number.isFinite(region[key])) ||
+                region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0 || region.x + region.width > 1 || region.y + region.height > 1)) fail(`第 ${index + 1} 页人工标注区域必须为 1～4 个有效归一化框`);
             expectedIds.add(expected.questionId);
         }
         if (sample.language !== undefined && !['zh', 'en'].includes(sample.language)) fail('language 只能为 zh 或 en');
@@ -48,6 +51,28 @@ async function inputs(args) {
     // 在首次模型请求前检查目标，避免误覆盖已有报告。
     try { await stat(output); fail('报告已存在，请指定新路径'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     return { samples, output };
+}
+
+const MIN_REGION_IOU = 0.5;
+function regionIoU(left, right) {
+    const width = Math.max(0, Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x));
+    const height = Math.max(0, Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y));
+    const intersection = width * height;
+    return intersection / (left.width * left.height + right.width * right.height - intersection);
+}
+
+/** 只按人工框与模型框定位答案，不读取题号、短码、文字或候选顺序；歧义不猜测。 */
+function pairByRegions(expected, candidates) {
+    const scores = expected.map((truth) => candidates.map((candidate) => Math.max(0, ...truth.regions.flatMap((region) => candidate.regions.map((box) => regionIoU(region, box))))));
+    const uniqueBest = (values) => {
+        const best = Math.max(0, ...values);
+        const indices = values.flatMap((value, index) => value >= MIN_REGION_IOU && Math.abs(value - best) < 1e-9 ? [index] : []);
+        return indices.length === 1 ? indices[0] : -1;
+    };
+    return scores.map((row, expectedIndex) => {
+        const candidateIndex = uniqueBest(row);
+        return candidateIndex >= 0 && uniqueBest(scores.map((values) => values[candidateIndex])) === expectedIndex ? candidates[candidateIndex] : null;
+    });
 }
 
 function runtime() {
@@ -89,10 +114,11 @@ async function main() {
             const extraction = await engine.service.extractExamPageAnswers({ imageBase64: image.toString('base64'), mimeType, questions: sample.questions, language: sample.language ?? 'zh' });
             const recognition = engine.buildAttemptPageRecognition(index + 1, extraction, new Date().toISOString());
             const matching = engine.matchExamAnswerCandidates(recognition.candidates, sample.questions);
-            for (const expected of sample.expected) {
-                const match = matching.matches.find((item) => item.questionId === expected.questionId);
-                const candidate = match && recognition.candidates.find((item) => item.candidateId === match.candidateId);
-                const matched = Boolean(candidate);
+            const paired = pairByRegions(sample.expected, recognition.candidates);
+            for (const [expectedIndex, expected] of sample.expected.entries()) {
+                const candidate = paired[expectedIndex];
+                const match = candidate && matching.matches.find((item) => item.candidateId === candidate.candidateId);
+                const matched = Boolean(match && match.questionId === expected.questionId);
                 const exact = matched && normalize(candidate.recognizedAnswer) === normalize(expected.normalizedAnswer);
                 if (matched) matchedCount++;
                 if (exact) exactAnswerCount++;
@@ -102,7 +128,7 @@ async function main() {
         } catch { process.stderr.write(`第 ${index + 1} 页提取失败；未生成报告，请检查模型配置或重试\n`); return 3; }
     }
     const expectedCount = results.length;
-    const report = { version: 1, provider: engine.provider, model: engine.model, expectedCount, matchedCount, exactAnswerCount,
+    const report = { version: 2, pairing: { method: 'mutual-best-region-iou', minIoU: MIN_REGION_IOU }, provider: engine.provider, model: engine.model, expectedCount, matchedCount, exactAnswerCount,
         matchingAccuracy: matchedCount / expectedCount, matchedExactAnswerAccuracy: exactAnswerCount / expectedCount,
         recommendedTarget: 0.95, meetsRecommendedTarget: exactAnswerCount / expectedCount >= 0.95,
         minimumEvaluationSize: 60, sufficientSampleSize: expectedCount >= 60, results };

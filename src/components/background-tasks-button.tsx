@@ -22,11 +22,12 @@ function formatElapsed(fromIso: string, toIso: string | null, now: number): stri
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+interface BackgroundTasksButtonProps { inline?: boolean }
+
 /**
- * 页面右下角的「后台任务」按钮：显示进行中的事务数，点击后弹框查看识别题目、生成动画讲解、
- * 重新解题、批量标注、生成试卷等耗时事务的进度与结果。
+ * 后台任务入口默认悬浮在右下角，也可嵌入页面操作栏，共用原有进度与结果弹层。
  */
-export function BackgroundTasksButton() {
+export function BackgroundTasksButton({ inline = false }: BackgroundTasksButtonProps) {
     const { t } = useLanguage();
     const { timeZone } = useTimeZone();
     const { status } = useSession();
@@ -70,7 +71,9 @@ export function BackgroundTasksButton() {
             <Button
                 variant="outline"
                 size="icon"
-                className="fixed bottom-20 right-4 z-40 h-11 w-11 rounded-full shadow-lg md:bottom-6 md:right-6 print:hidden"
+                data-background-tasks-inline={inline ? '' : undefined}
+                data-background-tasks-floating={inline ? undefined : ''}
+                className={inline ? "relative mr-auto h-11 w-11 shrink-0 rounded-full print:hidden" : "fixed bottom-20 right-4 z-40 h-11 w-11 rounded-full shadow-lg md:bottom-6 md:right-6 print:hidden"}
                 onClick={() => setOpen(true)}
                 aria-label={t.backgroundTasks.title}
                 title={t.backgroundTasks.title}

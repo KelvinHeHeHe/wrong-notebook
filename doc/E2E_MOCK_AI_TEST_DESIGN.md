@@ -329,3 +329,8 @@ Linux CI 使用 `npx playwright install --with-deps chromium` 安装浏览器和
 6. 从设置真实下载 v13 备份，在同邮箱空账号中经 UI 恢复。比较照片和页 recognitionResult（包括未匹配候选）、逐题答案/区域/分数、试卷/错题/练习记录重映射关联，再打开恢复的确认页。
 
 Mock 通过专用 `exam-answer-extraction` 操作匹配稳定协议标记；`extractionFailOnCall` 只影响第 N 次提取，不消耗判分或 mastery 调用。固定响应序列在每个独立场景重置，不依赖时钟或外部网络。`src/__tests__/unit/e2e-mock-ai.test.ts` 通过真实 OpenAI SDK 和 BaseAIProvider 验证提取协议、部分失败与重试。评测 CLI 的独立测试仅用合成图检查输入校验、两项指标、指定输出和退出码，真实样本的 ≥60 题及 95% 推荐目标见 [人工评测指南](EXAM_ANSWER_EVALUATION.md)。所有照片、识别候选及作答本地保存并包含在备份 v13 中。
+
+
+Task 10 第 1 轮修复验收：桌面与手机复核页均真实打开“后台任务”入口与弹层，验证弹层覆盖操作栏，关闭后真实点击确认。任务入口复用原组件以 inline 模式嵌入复核 footer；页面存在 inline 入口时仅隐藏全局悬浮副本，离开后自动恢复，避免靠互换 z-index 转移遮挡。移动端导航/safe-area 避让、底部留白及设置弹层断言保留。
+
+提取评测 manifest 现要求逐答案独立人工区域：候选先按区域 IoU 互为唯一最佳配对，再比较应用实际匹配的题 ID 与人工归属，交换题号不能取得 100%。CLI 单元覆盖交换标识、漏提/错配/文字错误分母、多框与乱序、同分歧义及坏区域拒绝；报告 version=2，定义见 [人工评测指南](EXAM_ANSWER_EVALUATION.md)。

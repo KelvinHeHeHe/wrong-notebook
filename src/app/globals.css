@@ -148,6 +148,11 @@
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* 页面把任务入口嵌入操作栏时，隐藏同一入口的悬浮副本；离开页面后自动恢复。 */
+body:has([data-background-tasks-inline]) [data-background-tasks-floating] {
+  display: none;
+}
+
 /* Print Styles for PDF Export */
 @media print {
   @page {
