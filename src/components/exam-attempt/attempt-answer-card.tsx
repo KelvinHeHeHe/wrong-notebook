@@ -11,11 +11,11 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { draftChanges, validAwardedScore, validDraft } from '@/lib/exam/exam-attempt-review-client';
 import { normalizeExamScore } from '@/lib/exam/exam-score';
 import { en } from '@/lib/i18n/en';
-import type { ExamAnswerDraft } from '@/lib/exam/exam-attempt-review-client';
-import type { ExamAttemptAnswerDetail, ExamAttemptPageDetail, ExamQuestionDetail } from '@/types/api';
+import type { ExamAnswerDraft, ExamReviewQuestion } from '@/lib/exam/exam-attempt-review-client';
+import type { ExamAttemptAnswerDetail, ExamAttemptPageDetail } from '@/types/api';
 
 interface AttemptAnswerCardProps {
-    question: ExamQuestionDetail;
+    question: ExamReviewQuestion;
     answer: ExamAttemptAnswerDetail | undefined;
     pages: ExamAttemptPageDetail[];
     draft: ExamAnswerDraft | null;
@@ -36,7 +36,7 @@ export function AttemptAnswerCard({ question, answer, pages, draft, disabled, co
     const status = answer?.reviewStatus;
     return <article aria-labelledby={`${id}-title`} className={`min-w-0 space-y-4 rounded-xl border p-4 ${status === 'required' ? 'border-amber-500' : ''}`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 id={`${id}-title`} className="font-semibold">{text.question.replace('{number}', String(question.order))}</h2>
+            <h2 id={`${id}-title`} className="font-semibold">{text.question.replace('{number}', String(question.displayNumber))}</h2>
             {answer && <Badge variant={status === 'required' ? 'destructive' : 'secondary'}>{status === 'required' ? text.requiredStatus : status === 'reviewed' ? text.reviewedStatus : text.pendingStatus}</Badge>}
         </div>
         <p className="whitespace-pre-wrap break-words text-sm">{question.questionText}</p>

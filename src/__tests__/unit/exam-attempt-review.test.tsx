@@ -8,6 +8,7 @@ import { AttemptRegionPreview } from '@/components/exam-attempt/attempt-region-p
 import * as languageContext from '@/contexts/LanguageContext';
 import { translations } from '@/lib/translations';
 import type { Translations } from '@/lib/translations';
+import type { ExamAttemptAnswerDetail, ExamQuestionDetail } from '@/types/api';
 import ExamAttemptReviewPage from '@/app/exam-attempts/[id]/page';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 import { ApiError, apiClient } from '@/lib/api-client';
@@ -22,8 +23,8 @@ vi.mock('@/lib/image-pipeline', () => ({ renderRegion: vi.fn() }));
 const region = JSON.stringify({ pageOrder: 2, candidateId: 'used', regions: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.4 }] });
 const candidate = { candidateId: 'free', sourceShortId: null, displayNumber: 99, recognizedAnswer: '候选正文', notAttempted: false, confidence: 0.5, regions: [] };
 const pages = [1, 2].map((order) => ({ id: `pg${order}`, attemptId: 'a1', order, imageData: `data:image/jpeg;base64,YQ==${order}`, mimeType: 'image/jpeg', width: 1000, height: 1400, checksum: `sum${order}`, recognitionResult: JSON.stringify({ version: 1, status: order === 1 ? 'failed' : 'succeeded', candidates: order === 1 ? [] : [candidate, { ...candidate, candidateId: 'used' }], errorCode: order === 1 ? 'TIMEOUT' : null, completedAt: '2026-11-09T00:00:00Z' }), createdAt: '2026-11-09T00:00:00Z', updatedAt: '2026-11-09T00:00:00Z' }));
-const answer = { id: 'ans1', attemptId: 'a1', examQuestionId: 'q1', recognizedAnswer: '原答案', result: 'wrong', awardedScore: 0, maxScore: 5, gradingSource: 'ai', gradingReason: '判分理由', confidence: 0.5, reviewStatus: 'required', regionJson: region, createdAt: '2026-11-09T00:00:00Z', updatedAt: '2026-11-09T00:00:00Z' };
-const question = { id: 'q1', order: 1, errorItemId: null, sourceShortId: 'S1', status: 'ready', questionText: '第一题题干', answerText: '标准答案', analysis: null, score: 5, error: null, notebookName: null, attempts: [] };
+const answer: ExamAttemptAnswerDetail = { id: 'ans1', attemptId: 'a1', examQuestionId: 'q1', recognizedAnswer: '原答案', result: 'wrong', awardedScore: 0, maxScore: 5, gradingSource: 'ai', gradingReason: '判分理由', confidence: 0.5, reviewStatus: 'required', regionJson: region, createdAt: '2026-11-09T00:00:00Z', updatedAt: '2026-11-09T00:00:00Z' };
+const question: ExamQuestionDetail = { id: 'q1', order: 1, errorItemId: null, sourceShortId: 'S1', status: 'ready', questionText: '第一题题干', answerText: '标准答案', analysis: null, score: 5, error: null, notebookName: null, attempts: [] };
 function detail() { return { id: 'a1', userId: 'u1', paperId: 'p1', status: 'review', updatedAt: 'v1', takenAt: '2026-11-09T00:00:00Z', comment: null, totalScore: null, maxScore: null, confirmedAt: null, createdAt: '2026-11-09T00:00:00Z', paper: { id: 'p1', title: '测试卷', status: 'ready', origin: 'imported' }, pages, answers: [{ ...answer }] }; }
 let latest: ReturnType<typeof detail>;
 let container: HTMLDivElement;
@@ -33,7 +34,14 @@ beforeEach(() => {
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
     latest = detail();
     vi.mocked(apiClient.get).mockImplementation(async (url) => url.startsWith('/api/exams/') ? { id: 'p1', title: '测试卷', status: 'ready', questions: [question] } : latest);
-    vi.mocked(apiClient.patch).mockImplementation(async (_url, body) => { const changes = body as Record<string, unknown>; latest = { ...latest, updatedAt: 'v2', answers: [{ ...latest.answers[0], ...changes, reviewStatus: changes.regrade ? 'required' : 'reviewed', gradingSource: changes.regrade ? 'ai' : 'manual' }] }; return { answer: latest.answers[0], updatedAt: latest.updatedAt }; });
+    vi.mocked(apiClient.patch).mockImplementation(async (url, body) => {
+        const changes = body as Record<string, unknown>;
+        const answerId = url.split('/').at(-1);
+        const saved = { ...latest.answers.find((item) => item.id === answerId)!, ...changes, reviewStatus: changes.regrade ? 'required' : 'reviewed', gradingSource: changes.regrade ? 'ai' : 'manual' } as ExamAttemptAnswerDetail;
+        if ('candidateRef' in changes) Object.assign(saved, { recognizedAnswer: changes.candidateRef === null ? null : '候选正文', regionJson: changes.candidateRef === null ? null : JSON.stringify({ ...changes.candidateRef as object, regions: [] }), result: null, awardedScore: null, gradingReason: null, gradingSource: null, reviewStatus: 'required' });
+        latest = { ...latest, updatedAt: 'v2', answers: latest.answers.map((item) => item.id === answerId ? saved : item) };
+        return { answer: saved, updatedAt: latest.updatedAt };
+    });
     vi.mocked(apiClient.post).mockImplementation(async () => { latest = { ...latest, updatedAt: 'v3' }; return { status: 'review', updatedAt: 'v3', successes: [], failures: [] }; });
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
@@ -167,6 +175,70 @@ describe('纸质作答复核', () => {
     it('复核分组缺失时回退英文', async () => {
         const context = vi.spyOn(languageContext, 'useLanguage').mockReturnValue({ language: 'en', setLanguage: vi.fn(), t: { ...translations.en, examAttempt: { ...translations.en.examAttempt, review: undefined } } as unknown as Translations });
         try { await render(); expect(container.textContent).toContain('Manual review required'); } finally { context.mockRestore(); }
+    });
+    it.each([
+        ['solution', '选择题', null],
+        ['解答题', 'Single Choice', null],
+        ['Solution', 'unknown', '单项选择'],
+    ])('分组打印编号统一用于卡片、候选和缺项（%s / %s）', async (solutionType, choiceType, linkedType) => {
+        latest.answers.push({ ...answer, id: 'ans2', examQuestionId: 'q2', reviewStatus: 'pending' });
+        const paper = { id: 'p1', title: '分组卷', status: 'ready', groupByType: true, questions: [
+            { ...question, questionType: solutionType },
+            { ...question, id: 'q2', order: 2, questionType: choiceType, errorItemQuestionType: linkedType, questionText: '选择题题干' },
+            { ...question, id: 'blank', order: 3, questionText: '' },
+            { ...question, id: 'failed', order: 4, status: 'failed' },
+        ] };
+        vi.mocked(apiClient.get).mockImplementation(async (url) => url.startsWith('/api/exams/') ? paper : latest);
+        await render();
+        const cards = [...container.querySelectorAll('article')];
+        expect(cards).toHaveLength(2); expect(cards[0].querySelector('h2')?.textContent).toBe('第 1 题'); expect(cards[0].textContent).toContain('选择题题干');
+        expect(cards[1].querySelector('h2')?.textContent).toBe('第 2 题'); expect(cards[1].textContent).toContain('第一题题干');
+        expect([...field('目标题目').querySelectorAll('option')].map((option) => [option.value, option.textContent])).toEqual([['', '请选择目标题目'], ['ans2', '第 1 题'], ['ans1', '第 2 题']]);
+        expect(container.textContent).toContain('第 2 题：尚未完成人工复核'); expect(container.textContent).not.toContain('第 1 题：尚未完成人工复核');
+    });
+    it('非分组的数据库题序有缺口时仍显示连续打印编号', async () => {
+        latest.answers.push({ ...answer, id: 'ans2', examQuestionId: 'q2' });
+        vi.mocked(apiClient.get).mockImplementation(async (url) => url.startsWith('/api/exams/') ? { id: 'p1', status: 'ready', groupByType: false, questions: [{ ...question, order: 5 }, { ...question, id: 'q2', order: 9 }] } : latest);
+        await render(); expect([...container.querySelectorAll('article h2')].map((heading) => heading.textContent)).toEqual(['第 1 题', '第 2 题']); expect(container.textContent).toContain('第 2 题：尚未完成人工复核');
+    });
+    it('解除仅发送 null 引用并刷新，可将释放候选映射另一题，映射后仍须判分', async () => {
+        latest.answers[0] = { ...answer, reviewStatus: 'reviewed', gradingSource: 'manual', awardedScore: 2.5 };
+        latest.answers.push({ ...answer, id: 'ans2', examQuestionId: 'q2', regionJson: null, reviewStatus: 'pending' });
+        vi.mocked(apiClient.get).mockImplementation(async (url) => url.startsWith('/api/exams/') ? { id: 'p1', status: 'ready', groupByType: true, questions: [{ ...question, questionType: 'solution' }, { ...question, id: 'q2', order: 2, questionType: 'single_choice' }] } : latest);
+        await render(); expect(container.textContent).toContain('当前关联：第 2 题'); expect(button('解除关联')).toBeDefined();
+        await click('解除关联'); expect(apiClient.patch).toHaveBeenCalledWith('/api/exam-attempts/a1/answers/ans1', { candidateRef: null, expectedUpdatedAt: 'v1' }, expect.anything());
+        const originalCard = container.querySelectorAll('article')[1]; expect(originalCard.textContent).toContain('必须人工复核'); expect(originalCard.querySelector<HTMLInputElement>('input[id$="-score"]')?.value).toBe(''); expect(originalCard.querySelector('textarea')?.value).toBe(''); expect(originalCard.querySelector('select')?.value).toBe('');
+        expect(container.textContent).toContain('关联已解除，原题须重新判定'); expect(apiClient.get).toHaveBeenCalledWith('/api/exam-attempts/a1');
+        const released = container.querySelector('section[aria-label="第 2 页"] ul')!.children[1] as HTMLLIElement;
+        const target = released.querySelector('select')!;
+        await act(async () => { target.value = 'ans2'; target.dispatchEvent(new Event('change', { bubbles: true })); });
+        await act(async () => released.querySelectorAll('button')[1].click());
+        expect(vi.mocked(apiClient.patch).mock.calls[1][1]).toEqual({ candidateRef: { pageOrder: 2, candidateId: 'used' }, expectedUpdatedAt: 'v2' });
+        expect(container.textContent).toContain('请人工判定并保存，或重新判分后复核'); expect(button('确认成绩').disabled).toBe(true); expect(container.textContent).not.toContain('已人工复核');
+    });
+    it('映射成功显示仍需人工判定，不将映射当作人工复核', async () => {
+        latest.answers[0].reviewStatus = 'pending'; await render(); await edit('目标题目', 'ans1'); await click('映射到此题');
+        expect(field('结果').value).toBe(''); expect(field('得分').value).toBe(''); expect(container.textContent).toContain('请人工判定并保存，或重新判分后复核'); expect(button('确认成绩').disabled).toBe(true);
+    });
+    it('解除期间阻止重复写入与其他操作，解除后保存携带新版本', async () => {
+        await render(); let finish!: (value: unknown) => void;
+        vi.mocked(apiClient.patch).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+        await click('解除关联'); expect(button('解除关联').disabled).toBe(true); expect(button('重试第 1 页').disabled).toBe(true); expect(container.textContent).toContain('正在解除关联'); await click('解除关联'); expect(apiClient.patch).toHaveBeenCalledTimes(1);
+        latest = { ...latest, updatedAt: 'unlink-v2', answers: [{ ...answer, regionJson: null, recognizedAnswer: null, result: null, awardedScore: null }] };
+        await act(async () => finish({ answer: latest.answers[0], updatedAt: 'unlink-v2' }));
+        await edit('结果', 'wrong'); await edit('得分', '0'); await click('保存并标记已复核'); expect(vi.mocked(apiClient.patch).mock.calls[1][1]).toMatchObject({ expectedUpdatedAt: 'unlink-v2' });
+    });
+    it.each(['dirty', 'confirmed', 'stale'])('解除在 %s 时禁用', async (mode) => {
+        if (mode === 'confirmed') latest.status = 'confirmed'; await render();
+        if (mode === 'dirty') await edit('得分', '2.5');
+        if (mode === 'stale') { vi.mocked(apiClient.patch).mockRejectedValueOnce(new ApiError(409, 'Conflict', {})); vi.mocked(apiClient.get).mockRejectedValueOnce(new Error('offline')); await click('保存并标记已复核'); }
+        expect(button('解除关联').disabled).toBe(true);
+    });
+    it('解除遭遇 409 刷新关联，不自动覆盖；无关联错误显示可理解提示', async () => {
+        await render(); vi.mocked(apiClient.patch).mockRejectedValueOnce(new ApiError(409, 'Conflict', {})); latest = { ...latest, updatedAt: 'fresh-unlink' };
+        await click('解除关联'); expect(container.querySelector('[role=alert]')?.textContent).toContain('已刷新'); expect(apiClient.patch).toHaveBeenCalledTimes(1);
+        vi.mocked(apiClient.patch).mockRejectedValueOnce(new ApiError(400, 'Bad Request', { message: 'EXAM_ATTEMPT_CANDIDATE_NOT_MAPPED', code: 'VALIDATION_ERROR' })); latest.answers[0].regionJson = null;
+        await click('解除关联'); expect(container.querySelector('[role=alert]')?.textContent).toContain('该题已无候选关联'); expect(vi.mocked(apiClient.patch).mock.calls[1][1]).toEqual({ candidateRef: null, expectedUpdatedAt: 'fresh-unlink' });
     });
     it('切换作答后迟到写入不污染新作答或导航', async () => {
         latest.answers[0].reviewStatus = 'pending'; let finish!: (value: unknown) => void;

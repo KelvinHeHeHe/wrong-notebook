@@ -10,7 +10,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { PageLoading } from '@/components/ui/page-loading';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { parseAttemptPageRecognition, summarizeExamAttemptScores } from '@/lib/exam/exam-attempt';
-import { answerDraft, reviewIssues, validDraft } from '@/lib/exam/exam-attempt-review-client';
+import { answerDraft, buildExamReviewQuestions, reviewIssues, validDraft } from '@/lib/exam/exam-attempt-review-client';
 import { useExamAttemptReview } from '@/lib/hooks/use-exam-attempt-review';
 import { en } from '@/lib/i18n/en';
 import { usePageTitle } from '@/lib/page-title';
@@ -26,17 +26,17 @@ export function ExamAttemptReview({ attemptId }: ExamAttemptReviewProps) {
     usePageTitle(text.title, data?.paper.title);
     if (!data) return error ? <main className="mx-auto max-w-4xl space-y-4 p-4"><p role="alert">{text[error]}</p><Button disabled={busy} onClick={() => void review.reload()}>{text.reload}</Button></main> : <PageLoading label={t.common.loading} />;
     const { attempt, paper } = data;
-    const questions = paper.questions.filter((question) => question.status === 'ready').sort((left, right) => left.order - right.order);
+    const questions = buildExamReviewQuestions(paper, language);
     const answers = attempt.answers.filter((answer) => questions.some((question) => question.id === answer.examQuestionId));
     const scores = summarizeExamAttemptScores(answers);
     const required = answers.filter((answer) => answer.reviewStatus === 'required').length;
-    const issues = reviewIssues(paper, answers, drafts);
+    const issues = reviewIssues(questions, answers, drafts);
     const dirty = Object.keys(drafts).length > 0;
     const confirmed = attempt.status === 'confirmed';
     const disabled = busy || stale || confirmed;
     const invalidStatus = attempt.status !== 'review' || paper.status !== 'ready';
     const canConfirm = !disabled && !invalidStatus && questions.length > 0 && issues.length === 0;
-    const phaseLabel = phase === 'save' || phase === 'saveAll' ? text.saving : phase === 'regrade' ? text.regrading : phase === 'retry' ? text.retrying : phase === 'map' ? text.mapping : phase === 'confirm' ? text.confirming : null;
+    const phaseLabel = phase === 'save' || phase === 'saveAll' ? text.saving : phase === 'regrade' ? text.regrading : phase === 'retry' ? text.retrying : phase === 'unmap' ? text.unmapping : phase === 'map' ? text.mapping : phase === 'confirm' ? text.confirming : null;
     return <main className="mx-auto min-h-screen max-w-4xl space-y-6 px-4 py-6 pb-72 md:px-8 md:pb-52">
         <Link href={`/exams/${attempt.paperId}`} className="inline-block text-sm underline underline-offset-4">{text.back}</Link>
         <PageHeader title={text.title} description={paper.title} />
@@ -55,7 +55,7 @@ export function ExamAttemptReview({ attemptId }: ExamAttemptReviewProps) {
             return <AttemptAnswerCard key={question.id} question={question} answer={answer} pages={attempt.pages} draft={answer ? drafts[answer.id] ?? answerDraft(answer) : null} disabled={disabled} confirmed={confirmed} onEdit={(field, value) => answer && review.edit(answer.id, field, value)} onSave={() => answer && void review.save(answer.id)} onRegrade={() => answer && void review.regrade(answer.id)} />;
         })}
         {dirty && <p className="text-sm text-muted-foreground">{text.saveFirst}</p>}
-        <UnmatchedCandidates pages={attempt.pages} answers={answers} questions={questions} disabled={disabled || dirty} onMap={(...args) => void review.mapCandidate(...args)} onRetry={(order) => void review.retryPage(order)} />
+        <UnmatchedCandidates pages={attempt.pages} answers={answers} questions={questions} disabled={disabled || dirty} onMap={(...args) => void review.mapCandidate(...args)} onRetry={(order) => void review.retryPage(order)} onUnmap={(answerId) => void review.unmapCandidate(answerId)} />
         {!confirmed && <section id="attempt-confirm-issues" aria-label={text.preflight} className="space-y-2 text-sm">
             {(issues.length > 0 || invalidStatus || !questions.length) && <h2 className="font-semibold">{text.preflight}</h2>}
             {invalidStatus && <p>{text.invalidStatus}</p>}{!questions.length && <p>{text.noQuestions}</p>}

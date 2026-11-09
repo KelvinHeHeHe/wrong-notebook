@@ -593,7 +593,7 @@ export interface ExamAttemptAnswerUpdate {
     awardedScore?: number | null;
     maxScore?: number | null;
     gradingReason?: string | null;
-    candidateRef?: { pageOrder: number; candidateId: string };
+    candidateRef?: { pageOrder: number; candidateId: string } | null;
     regrade?: boolean;
 }
 

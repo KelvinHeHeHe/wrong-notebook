@@ -8,9 +8,9 @@ import { answerDraft, draftChanges, validDraft } from '@/lib/exam/exam-attempt-r
 import type { ExamAnswerDraft } from '@/lib/exam/exam-attempt-review-client';
 import type { ExamAttemptAnswerUpdate, ExamAttemptAnswerUpdateResponse, ExamAttemptDetail, ExamPaperDetail } from '@/types/api';
 
-type Phase = 'save' | 'saveAll' | 'map' | 'regrade' | 'retry' | 'confirm' | 'reload' | null;
-type Notice = 'saved' | 'mappedNotice' | 'regraded' | 'retried' | null;
-type Failure = 'loadFailed' | 'conflict' | 'error' | 'refreshFailed' | null;
+type Phase = 'save' | 'saveAll' | 'map' | 'unmap' | 'regrade' | 'retry' | 'confirm' | 'reload' | null;
+type Notice = 'saved' | 'mappedNotice' | 'unmappedNotice' | 'regraded' | 'retried' | null;
+type Failure = 'loadFailed' | 'conflict' | 'error' | 'refreshFailed' | 'candidateNotMapped' | null;
 interface ReviewData { attempt: ExamAttemptDetail; paper: ExamPaperDetail }
 interface ReviewState {
     id: string;
@@ -79,7 +79,11 @@ export function useExamAttemptReview(attemptId: string, language: 'zh' | 'en') {
             update({ drafts: {} });
             try {
                 await refresh(token);
-                if (isCurrent(token)) update({ error: error instanceof ApiError && error.status === 409 ? 'conflict' : 'error' });
+                if (isCurrent(token)) {
+                    const notMapped = error instanceof ApiError && error.status === 400 && error.data && typeof error.data === 'object'
+                        && 'message' in error.data && error.data.message === 'EXAM_ATTEMPT_CANDIDATE_NOT_MAPPED';
+                    update({ error: error instanceof ApiError && error.status === 409 ? 'conflict' : notMapped ? 'candidateNotMapped' : 'error' });
+                }
             } catch { if (isCurrent(token)) update({ error: 'refreshFailed', stale: true }); }
         } finally {
             if (isCurrent(token) && !completed) { locked.current = false; update({ phase: null }); }
@@ -129,6 +133,13 @@ export function useExamAttemptReview(attemptId: string, language: 'zh' | 'en') {
         if (Object.keys(state.drafts).length) return;
         return write('map', async (token) => { await patchAnswer(answerId, { candidateRef: { pageOrder, candidateId } }, token); if (isCurrent(token)) await refresh(token); }, 'mappedNotice');
     };
+    const unmapCandidate = (answerId: string) => {
+        if (Object.keys(state.drafts).length) return;
+        return write('unmap', async (token) => {
+            await patchAnswer(answerId, { candidateRef: null }, token);
+            if (isCurrent(token)) await refresh(token);
+        }, 'unmappedNotice');
+    };
     const retryPage = (pageOrder: number) => {
         if (Object.keys(state.drafts).length) return;
         return write('retry', async (token) => {
@@ -149,5 +160,5 @@ export function useExamAttemptReview(attemptId: string, language: 'zh' | 'en') {
         catch { if (isCurrent(token)) update({ error: 'refreshFailed', stale: true }); }
         finally { if (isCurrent(token)) { locked.current = false; update({ phase: null }); } }
     };
-    return { ...(state.id === attemptId ? state : { ...state, data: null, error: null, drafts: {} }), busy: state.phase !== null, edit, save, saveAll, regrade, mapCandidate, retryPage, confirm, reload };
+    return { ...(state.id === attemptId ? state : { ...state, data: null, error: null, drafts: {} }), busy: state.phase !== null, edit, save, saveAll, regrade, mapCandidate, unmapCandidate, retryPage, confirm, reload };
 }
