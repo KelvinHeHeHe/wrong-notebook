@@ -10,6 +10,7 @@ export const createExamAttemptSchema = z.object({
 // Zod 不允许直接 omit 含 refinement 的对象；经原 schema 校验后再移除默认 role。
 const examAttemptPageSchema = z.object(importedExamPageSchema.shape)
     .omit({ role: true })
+    .strict()
     .pipe(importedExamPageSchema)
     .transform(({ role: _role, ...page }) => page);
 

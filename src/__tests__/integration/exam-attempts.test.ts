@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
     const tx = {
+        examPaper: { findUnique: vi.fn() },
         examAttempt: { create: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
         examAttemptPage: { create: vi.fn(), update: vi.fn() },
         examAttemptAnswer: { findMany: vi.fn(), deleteMany: vi.fn(), updateMany: vi.fn() },
@@ -59,6 +60,9 @@ const upload = (pages: ReturnType<typeof page>[], overrides: Record<string, unkn
     pages, expectedUpdatedAt: initialUpdatedAt.toISOString(), ...overrides,
 }), params());
 const region = (pageOrder: number) => JSON.stringify({ pageOrder, candidateId: `candidate-${pageOrder}`, regions: [] });
+const selectPage = (data: Record<string, unknown>, select?: Record<string, boolean>) => select
+    ? Object.fromEntries(Object.entries(data).filter(([key]) => select[key]))
+    : data;
 
 describe('纸质试卷作答与页面 API', () => {
     beforeEach(() => {
@@ -66,19 +70,20 @@ describe('纸质试卷作答与页面 API', () => {
         mocks.transaction.mockImplementation(async (callback) => callback(mocks.tx));
         mocks.user.findUnique.mockResolvedValue({ id: 'user-1', email: 'user@example.com' });
         mocks.examPaper.findUnique.mockResolvedValue({ id: 'paper-1', userId: 'user-1', status: 'ready' });
+        mocks.tx.examPaper.findUnique.mockResolvedValue({ id: 'paper-1', userId: 'user-1', status: 'ready' });
         mocks.examAttempt.findUnique.mockResolvedValue(attempt());
         mocks.tx.examAttempt.create.mockResolvedValue(attempt({ status: 'uploaded' }));
         mocks.tx.examAttempt.updateMany.mockResolvedValue({ count: 1 });
         mocks.tx.examAttempt.findUnique.mockResolvedValue(attempt({ status: 'uploaded', updatedAt: nextUpdatedAt }));
-        mocks.tx.examAttemptPage.create.mockImplementation(async ({ data }) => ({ id: 'new-page', ...data }));
-        mocks.tx.examAttemptPage.update.mockImplementation(async ({ data, where }) => ({ id: where.id, order: 1, ...data }));
+        mocks.tx.examAttemptPage.create.mockImplementation(async ({ data, select }) => selectPage({ id: 'new-page', ...data }, select));
+        mocks.tx.examAttemptPage.update.mockImplementation(async ({ data, where, select }) => selectPage({ id: where.id, order: 1, ...data }, select));
         mocks.tx.examAttemptAnswer.findMany.mockResolvedValue([]);
     });
 
     it('只有本人 ready 试卷可创建作答，写接口返回 updatedAt', async () => {
         const response = await CREATE(json({ takenAt: '2026-11-08T08:00:00+08:00', comment: '第一次作答' }), params('paper-1'));
         expect(response.status).toBe(201);
-        expect(await response.json()).toMatchObject({ id: 'attempt-1', status: 'uploaded', updatedAt: initialUpdatedAt.toISOString() });
+        expect(await response.json()).toMatchObject({ attemptId: 'attempt-1', status: 'uploaded', updatedAt: initialUpdatedAt.toISOString() });
         expect(mocks.tx.examAttempt.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
             userId: 'user-1', paperId: 'paper-1', takenAt: initialUpdatedAt, comment: '第一次作答', status: 'uploaded',
         }) }));
@@ -91,9 +96,22 @@ describe('纸质试卷作答与页面 API', () => {
         [{ id: 'paper-1', userId: 'user-1', status: 'review' }, 409],
     ])('拒绝不存在、他人或未发布的试卷 %#', async (paper, status) => {
         mocks.examPaper.findUnique.mockResolvedValue(paper);
+        mocks.tx.examPaper.findUnique.mockResolvedValue(paper);
         const response = await CREATE(json({ takenAt: initialUpdatedAt.toISOString() }), params('paper-1'));
         expect(response.status).toBe(status);
         expect(mocks.tx.examAttempt.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { latestPaper: null, expectedStatus: 404 },
+        { latestPaper: { id: 'paper-1', userId: 'user-1', status: 'review' }, expectedStatus: 409 },
+        { latestPaper: { id: 'paper-1', userId: 'other-user', status: 'ready' }, expectedStatus: 404 },
+    ])('在创建事务内按最新试卷归属和状态校验，删除或变更后不创建 %#', async ({ latestPaper, expectedStatus }) => {
+        mocks.tx.examPaper.findUnique.mockResolvedValue(latestPaper);
+        const response = await CREATE(json({ takenAt: initialUpdatedAt.toISOString() }), params('paper-1'));
+        expect(response.status).toBe(expectedStatus);
+        expect(mocks.tx.examAttempt.create).not.toHaveBeenCalled();
+        expect(mocks.examPaper.findUnique).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -105,16 +123,33 @@ describe('纸质试卷作答与页面 API', () => {
     });
 
     it('列表限定本人试卷、按作答日期倒序且不查询页图', async () => {
-        mocks.examAttempt.findMany.mockResolvedValue([{ id: 'attempt-2', takenAt: nextUpdatedAt }, { id: 'attempt-1', takenAt: initialUpdatedAt }]);
+        mocks.examAttempt.findMany.mockResolvedValue([
+            { id: 'attempt-2', takenAt: nextUpdatedAt, _count: { pages: 2 } },
+            { id: 'attempt-1', takenAt: initialUpdatedAt, _count: { pages: 0 } },
+        ]);
         const response = await LIST(new Request('http://localhost/api/exams/paper-1/attempts'), params('paper-1'));
         expect(response.status).toBe(200);
-        expect((await response.json()).map((item: { id: string }) => item.id)).toEqual(['attempt-2', 'attempt-1']);
+        expect(await response.json()).toEqual([
+            { id: 'attempt-2', takenAt: nextUpdatedAt.toISOString(), pageCount: 2 },
+            { id: 'attempt-1', takenAt: initialUpdatedAt.toISOString(), pageCount: 0 },
+        ]);
         expect(mocks.examAttempt.findMany).toHaveBeenCalledWith(expect.objectContaining({
             where: { paperId: 'paper-1', userId: 'user-1' }, orderBy: { takenAt: 'desc' },
         }));
         const query = mocks.examAttempt.findMany.mock.calls[0][0];
         expect(query.include?.pages).toBeUndefined();
         expect(query.select?.pages).toBeUndefined();
+    });
+
+    it('详情包含后续作答界面需要的试卷摘要', async () => {
+        const summary = { id: 'paper-1', title: '数学单元测验', status: 'ready', origin: 'imported' };
+        mocks.examAttempt.findUnique.mockImplementation(async ({ include }) => attempt(include?.paper ? { paper: summary } : {}));
+        const response = await DETAIL(new Request('http://localhost/api/exam-attempts/attempt-1'), params());
+        expect(response.status).toBe(200);
+        expect((await response.json()).paper).toEqual(summary);
+        expect(mocks.examAttempt.findUnique.mock.calls[0][0].include.paper).toEqual({
+            select: { id: true, title: true, status: true, origin: true },
+        });
     });
 
     it('他人试卷的列表返回 404 而非空列表', async () => {
@@ -157,6 +192,18 @@ describe('纸质试卷作答与页面 API', () => {
         });
     });
 
+    it.each(['create', 'replace'])('上传 %s 的响应只含页元数据，不读取或回传大图', async (kind) => {
+        if (kind === 'create') mocks.examAttempt.findUnique.mockResolvedValue(attempt({ pages: [] }));
+        const response = await upload([page(1, { imageData: page(9).imageData })]);
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.pages[0]).toMatchObject({ order: 1, checksum: checksum(9) });
+        expect(body.pages[0]).not.toHaveProperty('imageData');
+        const write = kind === 'create' ? mocks.tx.examAttemptPage.create : mocks.tx.examAttemptPage.update;
+        expect(write.mock.calls[0][0].select).toMatchObject({ id: true, order: true, checksum: true });
+        expect(write.mock.calls[0][0].select).not.toHaveProperty('imageData');
+    });
+
     it.each([
         [{ imageData: 'data:image/png;base64,bm90LWltYWdl' }, 'EXAM_PAGE_INVALID'],
         [{ width: 2 }, 'EXAM_PAGE_DIMENSIONS_MISMATCH'],
@@ -169,11 +216,17 @@ describe('纸质试卷作答与页面 API', () => {
     });
 
     it('复用原页图 schema 的 MIME 与像素校验且输出移除 role', () => {
-        const input = { pages: [page(1, { role: 'answer_key' })], expectedUpdatedAt: initialUpdatedAt.toISOString() };
+        const input = { pages: [page(1)], expectedUpdatedAt: initialUpdatedAt.toISOString() };
         const parsed = upsertExamAttemptPagesSchema.parse(input);
         expect(parsed.pages[0]).not.toHaveProperty('role');
         expect(upsertExamAttemptPagesSchema.safeParse({ ...input, pages: [page(1, { mimeType: 'image/jpeg' })] }).success).toBe(false);
         expect(upsertExamAttemptPagesSchema.safeParse({ ...input, pages: [page(1, { width: 3000, height: 2000 })] }).success).toBe(false);
+    });
+
+    it.each(['questions', 'answer_key', null, 'unknown'])('任何显式 role 都返回 400 而非静默丢弃：%s', async (role) => {
+        const response = await upload([page(1, { role })]);
+        expect(response.status).toBe(400);
+        expect(mocks.transaction).not.toHaveBeenCalled();
     });
 
     it('拒绝单次重复 checksum 及与未替换页的 checksum 冲突', async () => {

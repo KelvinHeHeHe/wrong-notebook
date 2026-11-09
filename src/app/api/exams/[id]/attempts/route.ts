@@ -19,8 +19,9 @@ export const GET = withUser(async (_req: Request, { user, params }: Context) => 
         const attempts = await prisma.examAttempt.findMany({
             where: { paperId: id, userId: user.id },
             orderBy: { takenAt: 'desc' },
+            include: { _count: { select: { pages: true } } },
         });
-        return NextResponse.json(attempts);
+        return NextResponse.json(attempts.map(({ _count, ...attempt }) => ({ ...attempt, pageCount: _count.pages })));
     } catch (error) {
         logger.error({ error }, '读取试卷作答列表失败');
         return internalError('Failed to fetch exam attempts', { error, scope: 'api:exams:attempts' });
@@ -33,20 +34,25 @@ export const POST = withUser(async (req: Request, { user, params }: Context) => 
         const parsed = createExamAttemptSchema.safeParse(await req.json().catch(() => null));
         if (!parsed.success) return validationError('Invalid exam attempt', parsed.error.issues);
 
-        const paper = await prisma.examPaper.findUnique({ where: { id }, select: { userId: true, status: true } });
-        if (!paper || paper.userId !== user.id) return notFound('Exam paper not found');
-        if (paper.status !== 'ready') return conflict('EXAM_PAPER_NOT_READY');
+        const result = await prisma.$transaction(async (tx) => {
+            const paper = await tx.examPaper.findUnique({ where: { id }, select: { userId: true, status: true } });
+            if (!paper || paper.userId !== user.id) return { kind: 'not-found' as const };
+            if (paper.status !== 'ready') return { kind: 'not-ready' as const };
 
-        const attempt = await prisma.$transaction((tx) => tx.examAttempt.create({
-            data: {
-                userId: user.id,
-                paperId: id,
-                status: 'uploaded',
-                takenAt: new Date(parsed.data.takenAt),
-                comment: parsed.data.comment ?? null,
-            },
-        }));
-        return NextResponse.json(attempt, { status: 201 });
+            const attempt = await tx.examAttempt.create({
+                data: {
+                    userId: user.id,
+                    paperId: id,
+                    status: 'uploaded',
+                    takenAt: new Date(parsed.data.takenAt),
+                    comment: parsed.data.comment ?? null,
+                },
+            });
+            return { kind: 'created' as const, attempt };
+        });
+        if (result.kind === 'not-found') return notFound('Exam paper not found');
+        if (result.kind === 'not-ready') return conflict('EXAM_PAPER_NOT_READY');
+        return NextResponse.json({ ...result.attempt, attemptId: result.attempt.id }, { status: 201 });
     } catch (error) {
         logger.error({ error }, '创建试卷作答失败');
         return internalError('Failed to create exam attempt', { error, scope: 'api:exams:attempts' });

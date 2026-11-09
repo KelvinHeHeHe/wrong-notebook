@@ -11,6 +11,10 @@ import { MAX_IMPORTED_EXAM_PAGES } from '@/lib/schemas/exam';
 import { upsertExamAttemptPagesSchema } from '@/lib/schemas/exam-attempt';
 
 const logger = createLogger('api:exam-attempts:pages');
+const pageMetadataSelect = {
+    id: true, attemptId: true, order: true, mimeType: true, width: true, height: true,
+    checksum: true, createdAt: true, updatedAt: true,
+} as const;
 
 export const POST = withUser(async (
     req: Request,
@@ -72,9 +76,12 @@ export const POST = withUser(async (
                     savedPages.push(await tx.examAttemptPage.update({
                         where: { id: existing.id },
                         data: { ...data, ...(changed ? { recognitionResult: null } : {}) },
+                        select: pageMetadataSelect,
                     }));
                 } else {
-                    savedPages.push(await tx.examAttemptPage.create({ data: { attemptId: id, order, ...data } }));
+                    savedPages.push(await tx.examAttemptPage.create({
+                        data: { attemptId: id, order, ...data }, select: pageMetadataSelect,
+                    }));
                 }
             }
 

@@ -18,6 +18,7 @@ export const GET = withUser(async (
         const attempt = await prisma.examAttempt.findUnique({
             where: { id },
             include: {
+                paper: { select: { id: true, title: true, status: true, origin: true } },
                 answers: { orderBy: { examQuestion: { order: 'asc' } } },
                 pages: {
                     orderBy: { order: 'asc' },
