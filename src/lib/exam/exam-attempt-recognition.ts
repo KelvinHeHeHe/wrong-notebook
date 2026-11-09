@@ -12,7 +12,7 @@ import {
     buildAttemptPageRecognition, matchExamAnswerCandidates, parseAttemptPageRecognition,
     parseAttemptRegionJson, requiresExamAnswerReview, serializeAttemptPageRecognition, suggestExamAnswerScore,
 } from '@/lib/exam/exam-attempt';
-import type { ExamAttemptAnswerCandidate, ExamAttemptPageRecognition } from '@/lib/exam/exam-attempt';
+import type { ExamAttemptAnswerCandidate, ExamAttemptMatchQuestion, ExamAttemptPageRecognition } from '@/lib/exam/exam-attempt';
 import { buildExamPrintLayout } from '@/lib/exam/exam-sections';
 import { createLogger } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
@@ -29,7 +29,7 @@ type Attempt = Prisma.ExamAttemptGetPayload<{ include: typeof attemptInclude }>;
 const currentSelect = {
     userId: true, status: true, updatedAt: true,
     pages: { select: { id: true, checksum: true } },
-    answers: { select: { id: true, examQuestionId: true, reviewStatus: true, regionJson: true } },
+    answers: { select: { id: true, examQuestionId: true, reviewStatus: true, gradingSource: true, regionJson: true } },
 } satisfies Prisma.ExamAttemptSelect;
 type CurrentAttempt = Prisma.ExamAttemptGetPayload<{ select: typeof currentSelect }>;
 type Question = Attempt['paper']['questions'][number];
@@ -87,6 +87,41 @@ function buildFailureRecognition(page: Page, recognition: ExamAttemptPageRecogni
         });
     }
     return { ...recognition, status: 'failed', errorCode, candidates: [...candidates.values()] };
+}
+
+function preserveManualAnswer(answer: { reviewStatus: string; gradingSource: string | null }, replaceReviewed: boolean): boolean {
+    return !replaceReviewed && (answer.reviewStatus === 'reviewed'
+        || (answer.reviewStatus === 'required' && answer.gradingSource === 'manual'));
+}
+
+/** 只检查本次成功页触及的题；失败信封是复核材料，不作为当前自动认领。 */
+function competingQuestionIds(
+    pages: Array<{ order: number; recognitionResult: string | null }>,
+    answers: Array<{ examQuestionId: string; regionJson: string | null }>,
+    questions: ExamAttemptMatchQuestion[],
+    pageOrder: number,
+): string[] {
+    const claims = new Map<string, Set<number>>();
+    const touched = new Set<string>();
+    const addClaim = (questionId: string, order: number) => {
+        const owners = claims.get(questionId) ?? new Set<number>();
+        owners.add(order);
+        claims.set(questionId, owners);
+    };
+    for (const page of pages) {
+        const recognition = page.recognitionResult ? parseAttemptPageRecognition(page.recognitionResult) : null;
+        if (recognition?.status !== 'succeeded') continue;
+        for (const match of matchExamAnswerCandidates(recognition.candidates, questions).matches) {
+            addClaim(match.questionId, page.order);
+            if (page.order === pageOrder) touched.add(match.questionId);
+        }
+    }
+    const existingOrders = new Set(pages.map((page) => page.order));
+    for (const answer of answers) {
+        const owner = answerPageOrder(answer.regionJson);
+        if (owner !== null && existingOrders.has(owner)) addClaim(answer.examQuestionId, owner);
+    }
+    return [...touched].filter((questionId) => (claims.get(questionId)?.size ?? 0) > 1);
 }
 
 function checkCurrent(current: CurrentAttempt | null, userId: string, version: Date, page?: Page): asserts current is CurrentAttempt {
@@ -193,6 +228,9 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
         id: question.id, displayNumber, sourceShortId: question.sourceShortId,
         questionText: (question.questionText ?? '').slice(0, 160),
     }));
+    const matchingQuestions = printLayout.items.map(({ question, displayNumber }) => ({
+        id: question.id, sourceShortId: question.sourceShortId, displayNumber,
+    }));
 
     for (const page of pages) {
         if (!page) continue;
@@ -216,9 +254,7 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
                     ...candidate, regions: candidate.regions.filter((region) => region.width > 0 && region.height > 0),
                 })),
             }, new Date().toISOString());
-            const matching = matchExamAnswerCandidates(envelope.candidates, printLayout.items.map(({ question, displayNumber }) => ({
-                id: question.id, sourceShortId: question.sourceShortId, displayNumber,
-            })));
+            const matching = matchExamAnswerCandidates(envelope.candidates, matchingQuestions);
             const ownedMatches = matching.matches.filter((match) => {
                 const existing = current.answers.find((answer) => answer.examQuestionId === match.questionId);
                 const owner = answerPageOrder(existing?.regionJson);
@@ -226,7 +262,7 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
             });
             matchedCount = ownedMatches.length;
             for (const match of ownedMatches) {
-                if (!replaceReviewed && current.answers.some((answer) => answer.examQuestionId === match.questionId && answer.reviewStatus === 'reviewed')) continue;
+                if (current.answers.some((answer) => answer.examQuestionId === match.questionId && preserveManualAnswer(answer, replaceReviewed))) continue;
                 await readCurrent(page);
                 const question = printLayout.questions.find((item) => item.id === match.questionId)!;
                 const candidate = envelope.candidates.find((item) => item.candidateId === match.candidateId)!;
@@ -245,7 +281,10 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
         }
 
         const persistPage = (recognition: ExamAttemptPageRecognition) => prisma.$transaction(async (tx) => {
-            const current = await tx.examAttempt.findUnique({ where: { id: attemptId, userId: user.id }, select: currentSelect });
+            const current = await tx.examAttempt.findUnique({
+                where: { id: attemptId, userId: user.id },
+                select: { ...currentSelect, pages: { select: { id: true, order: true, checksum: true, recognitionResult: true } } },
+            });
             checkCurrent(current, user.id, version, page);
             const updatedAt = nextVersion(version);
             const saved = await tx.examAttempt.updateMany({
@@ -256,7 +295,7 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
             await tx.examAttemptPage.update({ where: { id: page.id }, data: { recognitionResult: serializeAttemptPageRecognition(recognition) } });
             // 提取失败保留已有草稿；成功重识别才清除该页不再匹配的非人工答案。
             if (recognition.status === 'succeeded') {
-                const obsolete = current.answers.filter((answer) => answer.reviewStatus !== 'reviewed'
+                const obsolete = current.answers.filter((answer) => answer.reviewStatus !== 'reviewed' && !preserveManualAnswer(answer, replaceReviewed)
                     && answerPageOrder(answer.regionJson) === page.order && !drafts.has(answer.examQuestionId));
                 if (obsolete.length) await tx.examAttemptAnswer.deleteMany({
                     where: { attemptId, id: { in: obsolete.map((answer) => answer.id) }, reviewStatus: { not: 'reviewed' } },
@@ -271,6 +310,16 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
                         });
                     } else await tx.examAttemptAnswer.create({ data: { attemptId, examQuestionId, ...data } });
                 }
+                const retained = current.answers.filter((answer) => !obsolete.some((removed) => removed.id === answer.id));
+                const competing = competingQuestionIds(
+                    current.pages.map((savedPage) => savedPage.id === page.id
+                        ? { ...savedPage, recognitionResult: serializeAttemptPageRecognition(recognition) } : savedPage),
+                    [...retained, ...[...drafts].map(([examQuestionId, data]) => ({ examQuestionId, regionJson: data.regionJson ?? null }))],
+                    matchingQuestions, page.order,
+                );
+                if (competing.length) await tx.examAttemptAnswer.updateMany({
+                    where: { attemptId, examQuestionId: { in: competing } }, data: { reviewStatus: 'required' },
+                });
             }
             return updatedAt;
         });

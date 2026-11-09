@@ -15,6 +15,7 @@ vi.mock('@/lib/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.
 vi.unmock('@/lib/ai-consent-store');
 
 import { ExamAttemptRecognitionError, recognizeExamAttemptPages } from '@/lib/exam/exam-attempt-recognition';
+import { confirmExamAttempt, ExamAttemptConfirmError } from '@/lib/exam/exam-attempt-confirm';
 
 let database: PrismaClient;
 let directory: string;
@@ -54,6 +55,29 @@ async function fixture(consented = true) {
 }
 
 describe('纸质作答识别所有权与真实 SQLite 额度', () => {
+    it('跨页同题竞争在真实数据库中强制复核，阻止确认和历史入账', async () => {
+        const input = await fixture();
+        await database.examAttemptPage.create({ data: { attemptId: input.attemptId, order: 2, checksum: 'second', imageData: 'data:image/png;base64,REVG', mimeType: 'image/png' } });
+        mocks.service.mockResolvedValue({
+            extractExamPageAnswers: vi.fn(async ({ imageBase64 }: { imageBase64: string }) => ({ candidates: [{
+                sourceShortId: 'SOURCE', displayNumber: 1, recognizedAnswer: imageBase64 === 'QUJD' ? 'A' : 'B',
+                notAttempted: false, confidence: 0.99, regions: [],
+            }] })),
+            gradeAnswer: vi.fn(async () => ({ correct: true, reason: '判分完成' })),
+        });
+        const result = await recognizeExamAttemptPages({ ...input, pageOrders: [1, 2] });
+        expect(await database.examAttemptAnswer.findFirst({ where: { attemptId: input.attemptId } })).toMatchObject({ recognizedAnswer: 'A', reviewStatus: 'required', result: 'correct', awardedScore: 5 });
+        try {
+            await confirmExamAttempt({ ...input, expectedUpdatedAt: result.updatedAt });
+            expect.fail('跨页竞争尚未复核，不应允许确认');
+        } catch (error) {
+            expect(error).toBeInstanceOf(ExamAttemptConfirmError);
+            if (!(error instanceof ExamAttemptConfirmError)) throw error;
+            expect(await error.response.json()).toMatchObject({ message: 'EXAM_ATTEMPT_REVIEW_REQUIRED' });
+        }
+        expect(await database.practiceRecord.count()).toBe(0);
+        expect(await database.examAttempt.findUnique({ where: { id: input.attemptId } })).toMatchObject({ status: 'review' });
+    });
     it('两个相同版本请求竞争真实 CAS，仅新增一条 grade usage', async () => {
         const input = await fixture();
         const results = await Promise.allSettled([recognizeExamAttemptPages(input), recognizeExamAttemptPages(input)]);

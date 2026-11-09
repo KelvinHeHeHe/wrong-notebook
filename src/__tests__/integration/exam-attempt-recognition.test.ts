@@ -81,10 +81,11 @@ describe('纸质作答按页识别与独立判分', () => {
             return saved;
         });
         mocks.answerUpdate.mockImplementation(async ({ where, data }) => {
-            const target = state.answers.find((item) => item.id === where.id
+            const targets = state.answers.filter((item) => (!where.id || item.id === where.id)
+                && (!where.examQuestionId?.in || where.examQuestionId.in.includes(item.examQuestionId))
                 && (!where.reviewStatus?.not || item.reviewStatus !== where.reviewStatus.not));
-            if (target) Object.assign(target, data);
-            return { count: target ? 1 : 0 };
+            for (const target of targets) Object.assign(target, data);
+            return { count: targets.length };
         });
         mocks.answerDelete.mockImplementation(async ({ where }) => {
             state.answers = state.answers.filter((item) => !where.id.in.includes(item.id) || item.reviewStatus === 'reviewed');
@@ -219,6 +220,7 @@ describe('纸质作答按页识别与独立判分', () => {
         ] });
         const saved = state.answers.find((item) => item.examQuestionId === 'q1')!;
         expect(saved.recognizedAnswer).toBe(orders[0] === 1 ? '第一页作答' : '第二页作答');
+        expect(saved).toMatchObject({ reviewStatus: 'required', result: 'correct', awardedScore: 5 });
         expect(JSON.parse(saved.regionJson!).pageOrder).toBe(orders[0]);
         expect(JSON.parse(state.pages.find((item) => item.order === orders[1])!.recognitionResult!).candidates).toHaveLength(1);
         expect(mocks.grade).toHaveBeenCalledTimes(1);
@@ -227,9 +229,54 @@ describe('纸质作答按页识别与独立判分', () => {
     it.each([false, true])('其他页已认领的人工答案即使 replaceReviewed=%s 也不覆盖', async (replaceReviewed) => {
         state.answers = [answer({ regionJson: JSON.stringify({ pageOrder: 2, candidateId: 'p2', regions: [] }) })];
         await run({ pageOrders: [1], replaceReviewed });
-        expect(state.answers[0]).toMatchObject({ recognizedAnswer: '旧答案', reviewStatus: 'reviewed', awardedScore: 2 });
+        expect(state.answers[0]).toMatchObject({ recognizedAnswer: '旧答案', reviewStatus: 'required', awardedScore: 2, gradingSource: 'manual' });
         expect(mocks.grade).not.toHaveBeenCalled();
         expect(JSON.parse(state.pages[0].recognitionResult!).candidates).toHaveLength(1);
+    });
+
+    it('跨请求单页重试发现竞争后强制复核，重复识别归属页也不能绕过有效竞争', async () => {
+        await run({ pageOrders: [1] });
+        expect(state.answers.find((item) => item.examQuestionId === 'q1')?.reviewStatus).toBe('pending');
+        const response = await run({ pageOrders: [2] });
+        expect(await response.json()).toMatchObject({ successes: [{ pageOrder: 2, matchedCount: 0 }], failures: [], status: 'review', updatedAt: state.updatedAt.toISOString() });
+        expect(state.answers.find((item) => item.examQuestionId === 'q1')?.reviewStatus).toBe('required');
+        await run({ pageOrders: [1] });
+        expect(state.answers.find((item) => item.examQuestionId === 'q1')?.reviewStatus).toBe('required');
+    });
+
+    it('人工结果被新竞争降为 required 后，默认重识别保留人工答案和评分', async () => {
+        state.answers = [answer()];
+        await run({ pageOrders: [2] });
+        expect(state.answers[0]).toMatchObject({ reviewStatus: 'required', recognizedAnswer: '旧答案', result: 'wrong', awardedScore: 2 });
+        await run({ pageOrders: [1] });
+        expect(state.answers[0]).toMatchObject({ reviewStatus: 'required', recognizedAnswer: '旧答案', result: 'wrong', awardedScore: 2, gradingSource: 'manual' });
+        expect(mocks.grade).not.toHaveBeenCalled();
+    });
+
+    it.each(['failed', 'empty', 'removed'])('竞争页 %s 后不再用旧候选反复误报；AI 归属页可成功重识别', async (kind) => {
+        await run();
+        expect(state.answers.find((item) => item.examQuestionId === 'q1')?.reviewStatus).toBe('required');
+        if (kind === 'removed') state.pages = state.pages.filter((item) => item.order !== 2);
+        else {
+            if (kind === 'failed') mocks.extract.mockRejectedValueOnce(new Error('AI_TIMEOUT_ERROR'));
+            else mocks.extract.mockResolvedValueOnce({ candidates: [] });
+            await run({ pageOrders: [2] });
+            expect(state.answers.find((item) => item.examQuestionId === 'q1')?.reviewStatus).toBe('required');
+            if (kind === 'failed') expect(JSON.parse(state.pages[1].recognitionResult!).candidates).toHaveLength(1);
+        }
+        await run({ pageOrders: [1] });
+        expect(state.answers.find((item) => item.examQuestionId === 'q1')).toMatchObject({ reviewStatus: 'pending', result: 'correct', awardedScore: 5 });
+    });
+
+    it('失败信封仅保留材料，人工重新复核后不会被旧竞争永久降级', async () => {
+        await run();
+        expect(state.answers.find((item) => item.examQuestionId === 'q1')?.reviewStatus).toBe('required');
+        mocks.extract.mockRejectedValueOnce(new Error('AI_TIMEOUT_ERROR'));
+        await run({ pageOrders: [2] });
+        const reviewed = state.answers.find((item) => item.examQuestionId === 'q1')!;
+        Object.assign(reviewed, { reviewStatus: 'reviewed', gradingSource: 'manual', recognizedAnswer: '人工最终答案', awardedScore: 3 });
+        await run({ pageOrders: [1] });
+        expect(state.answers.find((item) => item.examQuestionId === 'q1')).toMatchObject({ reviewStatus: 'reviewed', gradingSource: 'manual', recognizedAnswer: '人工最终答案', awardedScore: 3 });
     });
 
     it.each(['page', 'patch', 'confirm'])('提取期间并发修改拒绝迟到结果：%s', async (change) => {
