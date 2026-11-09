@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { Prisma } from '@prisma/client';
 import { DEFAULT_QUESTION_DUPLICATE_THRESHOLD, duplicateQuestionSimilarity } from '@/lib/question/question-similarity';
 import { translations } from '@/lib/translations';

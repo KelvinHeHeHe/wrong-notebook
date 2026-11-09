@@ -563,6 +563,7 @@ describe('/api/exams', () => {
             }), params('p1'));
 
             expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({ success: true, affectedCount: 2 });
             expect(mocks.tx.practiceRecord.create).toHaveBeenCalledWith({
                 data: expect.objectContaining({
                     userId: 'user-1',
@@ -595,6 +596,9 @@ describe('/api/exams', () => {
             await RESULTS(json('http://localhost', 'POST', { takenAt: '2026-10-19T04:00:00.000Z', results: [{ questionId: 'q1', result: 'correct' }] }), params('p1'));
 
             expect(mocks.tx.practiceRecord.create).toHaveBeenCalledTimes(2);
+            for (const [input] of mocks.tx.practiceRecord.create.mock.calls) {
+                expect(input.data.examAttemptId ?? null).toBeNull();
+            }
             expect(mocks.tx.practiceRecord.create.mock.calls.map(([arg]) => [arg.data.examQuestionId, arg.data.result])).toEqual([['q1', 'wrong'], ['q1', 'correct']]);
         });
 

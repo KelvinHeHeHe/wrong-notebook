@@ -1,3 +1,5 @@
+import "server-only";
+
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { getAIService } from "@/lib/ai";
@@ -9,6 +11,7 @@ import { runReservedTask, startBackgroundTask } from "@/lib/background-tasks";
 import { resolveNotebookScope, SUBJECT_DISPLAY_NAMES } from "@/lib/notebook-scope";
 import { QUESTION_TYPES } from "@/lib/question/question-type";
 import type { BackgroundTaskHandle } from "@/lib/background-tasks";
+import { createExamPracticeRecord } from "@/lib/exam/exam-results";
 
 const logger = createLogger('exam');
 
@@ -451,22 +454,18 @@ export async function recordExamResults(paperId: string, userId: string, takenAt
             // 原题已删除的题目无法计入举一反三记录
             if (!question?.errorItemId || result === null) continue;
 
-            await tx.practiceRecord.create({
-                data: {
-                    userId,
-                    errorItemId: question.errorItemId,
-                    examQuestionId: question.id,
-                    source: 'exam',
-                    result,
-                    isCorrect: result === 'correct',
-                    createdAt: takenAt,
-                    difficulty: recordDifficulty,
-                    subject: question.errorItem?.subject?.name ?? null,
-                    questionText: question.questionText,
-                    answerText: question.answerText,
-                    analysis: question.analysis,
-                    figureSvg: question.figureSvg,
-                },
+            await createExamPracticeRecord(tx, {
+                userId,
+                errorItemId: question.errorItemId,
+                examQuestionId: question.id,
+                result,
+                takenAt,
+                difficulty: recordDifficulty,
+                subject: question.errorItem?.subject?.name ?? null,
+                questionText: question.questionText,
+                answerText: question.answerText,
+                analysis: question.analysis,
+                figureSvg: question.figureSvg,
             });
             affected.add(question.errorItemId);
         }

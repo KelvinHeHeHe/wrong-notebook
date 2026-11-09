@@ -120,6 +120,7 @@ describe('题目保存全局钩子', () => {
         });
         expect(events[0].input.questionText).toBe(questionText);
         expect(await database.errorItem.count()).toBe(1);
+        expect(await database.practiceRecord.count()).toBe(0);
     });
 
     it('saveQuestion 直接调用缺省 origin 为 manual', async () => {
@@ -193,8 +194,10 @@ describe('题目保存全局钩子', () => {
         expect(events[0].duplicate).toBe(false);
         expect(events[1].duplicate).toBe(true);
         expect(events[1].errorItemId).toBe(firstId);
-        // 只创建了一道错题
+        // 只创建一道错题，并保留原有重复导入快照行为
         expect(await database.errorItem.count()).toBe(1);
+        expect(await database.practiceRecord.count()).toBe(1);
+        expect(await database.practiceRecord.findFirstOrThrow()).toMatchObject({ errorItemId: firstId, source: 'duplicate_import', result: 'wrong' });
     });
 
     it('钩子抛错时整笔事务回滚：错题不落库，返回失败', async () => {
