@@ -296,6 +296,13 @@ export function matchExamAnswerCandidates(
     };
 }
 
+/** 逐候选解析确定目标，允许多份候选指向同题；自动判分仍须使用整页唯一匹配。 */
+export function resolveExamAnswerCandidateTargets(
+    candidates: ExamAttemptAnswerCandidate[], questions: ExamAttemptMatchQuestion[],
+): ExamAttemptCandidateMatch[] {
+    return candidates.flatMap((candidate) => matchExamAnswerCandidates([candidate], questions).matches);
+}
+
 export function requiresExamAnswerReview(input: ExamAnswerReviewInput): boolean {
     return input.confidence === null || input.confidence < EXAM_ANSWER_REVIEW_CONFIDENCE
         || ['solution', 'reading', 'writing', 'other'].includes(input.questionType ?? '')

@@ -257,6 +257,7 @@ describe('纸质试卷作答与页面 API', () => {
             { id: 'pending-1', reviewStatus: 'pending', regionJson: region(1) },
             { id: 'required-1', reviewStatus: 'required', regionJson: region(1) },
             { id: 'reviewed-1', reviewStatus: 'reviewed', regionJson: region(1), recognizedAnswer: '人工答案', result: 'wrong', awardedScore: 2, maxScore: 5, gradingSource: 'manual' },
+            { id: 'manual-required-1', reviewStatus: 'required', regionJson: region(1), recognizedAnswer: '人工待复核', result: 'correct', awardedScore: 4, maxScore: 5, gradingSource: 'manual' },
             { id: 'pending-2', reviewStatus: 'pending', regionJson: region(2) },
             { id: 'reviewed-2', reviewStatus: 'reviewed', regionJson: region(2) },
             { id: 'no-region', reviewStatus: 'pending', regionJson: null },
@@ -270,7 +271,7 @@ describe('纸质试卷作答与页面 API', () => {
             where: { attemptId: 'attempt-1', id: { in: ['pending-1', 'required-1'] }, reviewStatus: { not: 'reviewed' } },
         });
         expect(mocks.tx.examAttemptAnswer.updateMany).toHaveBeenCalledWith({
-            where: { attemptId: 'attempt-1', id: { in: ['reviewed-1'] }, reviewStatus: 'reviewed' }, data: { regionJson: null },
+            where: { attemptId: 'attempt-1', id: { in: ['reviewed-1', 'manual-required-1'] } }, data: { regionJson: null, confidence: null },
         });
     });
 

@@ -87,23 +87,24 @@ export const POST = withUser(async (
 
             if (replacedOrders.size > 0) {
                 const answers = await tx.examAttemptAnswer.findMany({
-                    where: { attemptId: id }, select: { id: true, reviewStatus: true, regionJson: true },
+                    where: { attemptId: id }, select: { id: true, reviewStatus: true, gradingSource: true, regionJson: true },
                 });
                 const affected = answers.filter((answer) => {
                     const region = parseAttemptRegionJson(answer.regionJson);
                     return region !== null && replacedOrders.has(region.pageOrder);
                 });
-                const pendingIds = affected.filter((answer) => answer.reviewStatus !== 'reviewed').map((answer) => answer.id);
-                const reviewedIds = affected.filter((answer) => answer.reviewStatus === 'reviewed').map((answer) => answer.id);
+                const preserved = affected.filter((answer) => answer.reviewStatus === 'reviewed' || answer.gradingSource === 'manual');
+                const preservedIds = new Set(preserved.map((answer) => answer.id));
+                const pendingIds = affected.filter((answer) => !preservedIds.has(answer.id)).map((answer) => answer.id);
                 if (pendingIds.length > 0) {
                     await tx.examAttemptAnswer.deleteMany({
                         where: { attemptId: id, id: { in: pendingIds }, reviewStatus: { not: 'reviewed' } },
                     });
                 }
-                if (reviewedIds.length > 0) {
+                if (preservedIds.size > 0) {
                     await tx.examAttemptAnswer.updateMany({
-                        where: { attemptId: id, id: { in: reviewedIds }, reviewStatus: 'reviewed' },
-                        data: { regionJson: null },
+                        where: { attemptId: id, id: { in: [...preservedIds] } },
+                        data: { regionJson: null, confidence: null },
                     });
                 }
             }

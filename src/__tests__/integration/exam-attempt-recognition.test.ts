@@ -234,6 +234,39 @@ describe('纸质作答按页识别与独立判分', () => {
         expect(JSON.parse(state.pages[0].recognitionResult!).candidates).toHaveLength(1);
     });
 
+    it.each([[1, 2], [2, 1]])('另一页 B/C 均指向 Q1 时仍构成竞争：页序 %j', async (first, second) => {
+        mocks.extract.mockImplementation(async ({ imageBase64 }: { imageBase64: string }) => ({ candidates: imageBase64.endsWith('1')
+            ? [candidate(1, { recognizedAnswer: 'A' })]
+            : [candidate(1, { recognizedAnswer: 'B' }), candidate(1, { recognizedAnswer: 'C' })],
+        }));
+        const response = await run({ pageOrders: [first, second] });
+        expect(response.status).toBe(200);
+        expect(state.answers.find((item) => item.examQuestionId === 'q1')).toMatchObject({ recognizedAnswer: 'A', reviewStatus: 'required', awardedScore: 5 });
+        expect(mocks.grade).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(state.pages[1].recognitionResult!).candidates).toHaveLength(2);
+    });
+
+    it.each([false, true])('同页 B/C 冲突无其他页时也必须 required，人工旧结果=%s', async (manual) => {
+        if (manual) state.answers = [answer()];
+        mocks.extract.mockResolvedValueOnce({ candidates: [candidate(1, { recognizedAnswer: 'B' }), candidate(1, { recognizedAnswer: 'C' })] });
+        await run({ pageOrders: [1] });
+        expect(state.answers.find((item) => item.examQuestionId === 'q1')).toMatchObject(manual
+            ? { reviewStatus: 'required', recognizedAnswer: '旧答案', awardedScore: 2 }
+            : { reviewStatus: 'required', recognizedAnswer: null, awardedScore: null });
+        expect(mocks.grade).not.toHaveBeenCalled();
+    });
+
+    it('模糊无目标、未知短码及跨标识冲突候选不错误降级他页人工结果', async () => {
+        state.answers = [answer()];
+        mocks.extract.mockResolvedValueOnce({ candidates: [
+            candidate(1, { sourceShortId: null, displayNumber: null }),
+            candidate(1, { sourceShortId: 'UNKNOWN' }), candidate(1, { displayNumber: 2 }),
+        ] });
+        await run({ pageOrders: [2] });
+        expect(state.answers[0]).toMatchObject({ reviewStatus: 'reviewed', recognizedAnswer: '旧答案', awardedScore: 2 });
+        expect(mocks.grade).not.toHaveBeenCalled();
+    });
+
     it('跨请求单页重试发现竞争后强制复核，重复识别归属页也不能绕过有效竞争', async () => {
         await run({ pageOrders: [1] });
         expect(state.answers.find((item) => item.examQuestionId === 'q1')?.reviewStatus).toBe('pending');

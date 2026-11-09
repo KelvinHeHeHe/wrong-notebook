@@ -10,7 +10,7 @@ import { conflict, createErrorResponse, ErrorCode, notFound, validationError } f
 import type { ApiErrorResponse } from '@/lib/api-errors';
 import {
     buildAttemptPageRecognition, matchExamAnswerCandidates, parseAttemptPageRecognition,
-    parseAttemptRegionJson, requiresExamAnswerReview, serializeAttemptPageRecognition, suggestExamAnswerScore,
+    parseAttemptRegionJson, requiresExamAnswerReview, resolveExamAnswerCandidateTargets, serializeAttemptPageRecognition, suggestExamAnswerScore,
 } from '@/lib/exam/exam-attempt';
 import type { ExamAttemptAnswerCandidate, ExamAttemptMatchQuestion, ExamAttemptPageRecognition } from '@/lib/exam/exam-attempt';
 import { buildExamPrintLayout } from '@/lib/exam/exam-sections';
@@ -103,6 +103,7 @@ function competingQuestionIds(
 ): string[] {
     const claims = new Map<string, Set<number>>();
     const touched = new Set<string>();
+    const repeated = new Set<string>();
     const addClaim = (questionId: string, order: number) => {
         const owners = claims.get(questionId) ?? new Set<number>();
         owners.add(order);
@@ -111,9 +112,14 @@ function competingQuestionIds(
     for (const page of pages) {
         const recognition = page.recognitionResult ? parseAttemptPageRecognition(page.recognitionResult) : null;
         if (recognition?.status !== 'succeeded') continue;
-        for (const match of matchExamAnswerCandidates(recognition.candidates, questions).matches) {
+        const counts = new Map<string, number>();
+        for (const match of resolveExamAnswerCandidateTargets(recognition.candidates, questions)) {
             addClaim(match.questionId, page.order);
-            if (page.order === pageOrder) touched.add(match.questionId);
+            counts.set(match.questionId, (counts.get(match.questionId) ?? 0) + 1);
+            if (page.order === pageOrder) {
+                touched.add(match.questionId);
+                if (counts.get(match.questionId)! > 1) repeated.add(match.questionId);
+            }
         }
     }
     const existingOrders = new Set(pages.map((page) => page.order));
@@ -121,7 +127,7 @@ function competingQuestionIds(
         const owner = answerPageOrder(answer.regionJson);
         if (owner !== null && existingOrders.has(owner)) addClaim(answer.examQuestionId, owner);
     }
-    return [...touched].filter((questionId) => (claims.get(questionId)?.size ?? 0) > 1);
+    return [...touched].filter((questionId) => repeated.has(questionId) || (claims.get(questionId)?.size ?? 0) > 1);
 }
 
 function checkCurrent(current: CurrentAttempt | null, userId: string, version: Date, page?: Page): asserts current is CurrentAttempt {

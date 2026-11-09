@@ -3,6 +3,7 @@ import {
     EXAM_ANSWER_REVIEW_CONFIDENCE,
     buildAttemptPageRecognition,
     matchExamAnswerCandidates,
+    resolveExamAnswerCandidateTargets,
     parseAttemptPageRecognition,
     parseAttemptRegionJson,
     requiresExamAnswerReview,
@@ -60,6 +61,20 @@ describe('buildAttemptPageRecognition', () => {
 });
 
 describe('matchExamAnswerCandidates', () => {
+    it('重复候选可确定同一目标题，但不能作为唯一自动判分匹配', () => {
+        const rows = [candidate(), { ...candidate({ recognizedAnswer: '答案 B' }), candidateId: 'candidate-2' }];
+        expect(resolveExamAnswerCandidateTargets(rows, questions)).toEqual([
+            { candidateId: 'candidate-1', questionId: 'question-a' }, { candidateId: 'candidate-2', questionId: 'question-a' },
+        ]);
+        expect(matchExamAnswerCandidates(rows, questions).matches).toEqual([]);
+    });
+
+    it('无目标、未知短码、跨标识冲突及非唯一题号不能声明确定目标', () => {
+        expect(resolveExamAnswerCandidateTargets([
+            candidate({ sourceShortId: null, displayNumber: null }), candidate({ sourceShortId: 'missing' }), candidate({ displayNumber: 2 }),
+        ], questions)).toEqual([]);
+        expect(resolveExamAnswerCandidateTargets([candidate({ sourceShortId: null, displayNumber: 1 })], [...questions, { id: 'ambiguous', shortId: null, displayNumber: 1 }])).toEqual([]);
+    });
     it('短 ID 完全匹配优先', () => {
         const result = matchExamAnswerCandidates([candidate()], questions);
         expect(result.matches).toEqual([{ candidateId: expect.any(String), questionId: 'question-a' }]);

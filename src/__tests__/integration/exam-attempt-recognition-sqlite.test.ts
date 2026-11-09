@@ -7,15 +7,20 @@ import { join, resolve } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ prisma: undefined as PrismaClient | undefined, service: vi.fn() }));
+const mocks = vi.hoisted(() => ({ prisma: undefined as PrismaClient | undefined, service: vi.fn(),
+    session: null as { user: { email: string }; expires: string } | null,
+}));
 vi.mock('@/lib/prisma', () => ({ get prisma() { return mocks.prisma; } }));
 vi.mock('@/lib/ai', () => ({ getAIService: mocks.service }));
 vi.mock('@/lib/config', () => ({ getAppConfig: () => ({ aiDailyLimit: 100 }), getAppTimeZone: () => 'Asia/Shanghai' }));
 vi.mock('@/lib/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 vi.unmock('@/lib/ai-consent-store');
+vi.mock('next-auth', () => ({ getServerSession: vi.fn(async () => mocks.session) }));
+vi.mock('@/lib/auth', () => ({ authOptions: {} }));
 
 import { ExamAttemptRecognitionError, recognizeExamAttemptPages } from '@/lib/exam/exam-attempt-recognition';
 import { confirmExamAttempt, ExamAttemptConfirmError } from '@/lib/exam/exam-attempt-confirm';
+import { POST as UPLOAD } from '@/app/api/exam-attempts/[id]/pages/route';
 
 let database: PrismaClient;
 let directory: string;
@@ -32,6 +37,7 @@ beforeAll(() => {
 
 beforeEach(async () => {
     vi.clearAllMocks();
+    mocks.session = null;
     await database.user.deleteMany();
     mocks.service.mockResolvedValue({ extractExamPageAnswers: vi.fn(async () => ({ candidates: [] })) });
 });
@@ -55,6 +61,36 @@ async function fixture(consented = true) {
 }
 
 describe('纸质作答识别所有权与真实 SQLite 额度', () => {
+    it('人工 reviewed 被跨页竞争降为 required 后，替换来源页保留人工内容并清除位置与置信度', async () => {
+        const input = await fixture();
+        const question = await database.examQuestion.findFirstOrThrow();
+        const manual = await database.examAttemptAnswer.create({ data: {
+            attemptId: input.attemptId, examQuestionId: question.id, recognizedAnswer: '人工保留的答案', result: 'wrong',
+            awardedScore: 2.5, maxScore: 5, gradingSource: 'manual', gradingReason: '人工保留的判分说明', reviewStatus: 'reviewed', confidence: 0.98,
+            regionJson: JSON.stringify({ pageOrder: 1, candidateId: 'manual-source', regions: [] }),
+        } });
+        await database.examAttemptPage.create({ data: { attemptId: input.attemptId, order: 2, checksum: 'second', imageData: 'data:image/png;base64,REVG', mimeType: 'image/png' } });
+        mocks.service.mockResolvedValue({ extractExamPageAnswers: vi.fn(async () => ({ candidates: [{
+            sourceShortId: 'SOURCE', displayNumber: 1, recognizedAnswer: '另一页竞争答案', notAttempted: false, confidence: 0.99, regions: [],
+        }] })) });
+        const recognized = await recognizeExamAttemptPages({ ...input, pageOrders: [2] });
+        expect(await database.examAttemptAnswer.findUnique({ where: { id: manual.id } })).toMatchObject({ reviewStatus: 'required' });
+        mocks.session = { user: { email: input.user.email }, expires: '2099-01-01' };
+        const imageData = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+        const response = await UPLOAD(new Request('http://localhost/api/exam-attempts/' + input.attemptId + '/pages', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pages: [{ order: 1, imageData, mimeType: 'image/png', width: 1, height: 1 }], expectedUpdatedAt: recognized.updatedAt }),
+        }), { params: Promise.resolve({ id: input.attemptId }) });
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body).toMatchObject({ status: 'uploaded', updatedAt: expect.any(String) });
+        expect(body.pages[0]).not.toHaveProperty('imageData');
+        expect(await database.examAttemptAnswer.findUnique({ where: { id: manual.id } })).toMatchObject({
+            recognizedAnswer: manual.recognizedAnswer, result: manual.result, awardedScore: manual.awardedScore,
+            maxScore: manual.maxScore, gradingReason: manual.gradingReason, gradingSource: 'manual', reviewStatus: 'required',
+            regionJson: null, confidence: null,
+        });
+    });
     it('跨页同题竞争在真实数据库中强制复核，阻止确认和历史入账', async () => {
         const input = await fixture();
         await database.examAttemptPage.create({ data: { attemptId: input.attemptId, order: 2, checksum: 'second', imageData: 'data:image/png;base64,REVG', mimeType: 'image/png' } });
