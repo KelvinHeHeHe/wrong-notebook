@@ -196,6 +196,19 @@ describe('纸质作答复核', () => {
         expect([...field('目标题目').querySelectorAll('option')].map((option) => [option.value, option.textContent])).toEqual([['', '请选择目标题目'], ['ans2', '第 1 题'], ['ans1', '第 2 题']]);
         expect(container.textContent).toContain('第 2 题：尚未完成人工复核'); expect(container.textContent).not.toContain('第 1 题：尚未完成人工复核');
     });
+    it.each([false, true].flatMap((groupByType) => [null, '', ' \n\t '].map((questionText) => ({ groupByType, questionText }))))('复核只显示可打印题，空题干 ready 不产生缺项：%j', async ({ groupByType, questionText }) => {
+        latest.answers[0].reviewStatus = 'pending';
+        vi.mocked(apiClient.get).mockImplementation(async (url) => url.startsWith('/api/exams/') ? { id: 'p1', status: 'ready', groupByType, questions: [question,
+            { ...question, id: 'empty', order: 2, questionText },
+            { ...question, id: 'failed', order: 3, status: 'failed', questionText: '失败题不显示' },
+        ] } : latest);
+        await render();
+        expect(container.querySelectorAll('article')).toHaveLength(1);
+        expect(container.textContent).toContain('第一题题干');
+        expect(container.textContent).not.toContain('失败题不显示');
+        expect(container.textContent).not.toContain('第 2 题：');
+        expect(button('确认成绩').disabled).toBe(false);
+    });
     it('非分组的数据库题序有缺口时仍显示连续打印编号', async () => {
         latest.answers.push({ ...answer, id: 'ans2', examQuestionId: 'q2' });
         vi.mocked(apiClient.get).mockImplementation(async (url) => url.startsWith('/api/exams/') ? { id: 'p1', status: 'ready', groupByType: false, questions: [{ ...question, order: 5 }, { ...question, id: 'q2', order: 9 }] } : latest);

@@ -10,7 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const mocks = vi.hoisted(() => ({ prisma: undefined as PrismaClient | undefined }));
 vi.mock('@/lib/prisma', () => ({ get prisma() { return mocks.prisma; } }));
 vi.mock('@/lib/logger', () => ({ createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
-import { confirmExamAttempt } from '@/lib/exam/exam-attempt-confirm';
+import { confirmExamAttempt, ExamAttemptConfirmError } from '@/lib/exam/exam-attempt-confirm';
 
 let database: PrismaClient;
 let directory: string;
@@ -59,8 +59,34 @@ describe('纸质作答确认事务', () => {
     });
     it('缺少任一道 ready 题答案时拒绝；失败题不参与确认', async () => {
         const { attempt, input, paper } = await fixture();
-        await database.examQuestion.create({ data: { paperId: paper.id, order: 2, sourceShortId: 'Q00002', status: 'ready' } });
+        await database.examQuestion.create({ data: { paperId: paper.id, order: 2, sourceShortId: 'Q00002', status: 'ready', questionText: '尚未识别的可打印题目' } });
         await expect(confirmExamAttempt(input)).rejects.toThrow();
+        await expectUntouched(attempt.id);
+    });
+    it.each([false, true].flatMap((groupByType) => [null, '', ' \n\t '].map((questionText) => ({ groupByType, questionText }))))('确认只要求可打印题，忽略空题干 ready 与非 ready：%j', async ({ groupByType, questionText }) => {
+        const { input, paper } = await fixture({ result: 'correct', awardedScore: 5 });
+        await database.examPaper.update({ where: { id: paper.id }, data: { groupByType } });
+        const skipped = await database.examQuestion.create({ data: { paperId: paper.id, order: 2, sourceShortId: 'EMPTY', status: 'ready', questionText, score: 900 } });
+        await database.examQuestion.createMany({ data: ['failed', 'pending'].map((status, index) => ({ paperId: paper.id, order: index + 3, sourceShortId: status, status, questionText: '非 ready 题目', score: 900 })) });
+        // 旧草稿即使保留异常题答案，也不能影响本次打印题集的成绩与历史。
+        await database.examAttemptAnswer.create({ data: { attemptId: input.attemptId, examQuestionId: skipped.id, result: 'wrong', awardedScore: 300, maxScore: 900, reviewStatus: 'required' } });
+        const result = await confirmExamAttempt(input);
+        expect(result.summary).toMatchObject({ status: 'confirmed', totalScore: 5, maxScore: 5 });
+        expect((await database.practiceRecord.findMany()).map((record) => record.examQuestionId)).toEqual(['q1']);
+        expect(await database.errorItem.count()).toBe(0);
+    });
+    it.each([null, '', ' \n\t '])('无任何可打印题时明确拒绝确认：%j', async (questionText) => {
+        const { attempt, input } = await fixture();
+        await database.examQuestion.update({ where: { id: 'q1' }, data: { questionText } });
+        try {
+            await confirmExamAttempt(input);
+            expect.fail('无可打印题不应允许确认');
+        } catch (error) {
+            expect(error).toBeInstanceOf(ExamAttemptConfirmError);
+            if (!(error instanceof ExamAttemptConfirmError)) throw error;
+            expect(error.response.status).toBe(400);
+            expect(await error.response.json()).toMatchObject({ message: 'EXAM_ATTEMPT_NO_READY_QUESTIONS' });
+        }
         await expectUntouched(attempt.id);
     });
     it('正确外部题只写空错题关联的 exam 快照，并从数据库重算成绩', async () => {

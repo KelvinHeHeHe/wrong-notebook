@@ -18,6 +18,8 @@ describe('groupExamQuestions 按题型分大题', () => {
             { ...q('b', 3, 'single_choice'), status: 'failed', questionText: '失败题' },
             { ...q('c', 7, null, { errorItemQuestionType: 'single_choice' }), status: 'ready', questionText: '选择题' },
             { ...q('d', 9, 'fill_blank'), status: 'ready', questionText: null },
+            { ...q('e', 10, 'fill_blank'), status: 'ready', questionText: ' \n\t ' },
+            { ...q('f', 11, 'fill_blank'), status: 'ready', questionText: '' },
         ];
         expect(buildExamPrintLayout(questions, true, 'zh').items.map(({ question, displayNumber }) => [question.id, displayNumber])).toEqual([['c', 1], ['a', 2]]);
         expect(buildExamPrintLayout(questions, false, 'zh').items.map(({ question, displayNumber }) => [question.id, displayNumber])).toEqual([['a', 1], ['c', 2]]);

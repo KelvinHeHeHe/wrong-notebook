@@ -27,12 +27,17 @@ export interface ExamSectionItem<T extends ExamSectionQuestion> {
     displayNumber: number;
 }
 
+/** 纸卷只包含已就绪且题干非空白的题目；打印、识别、复核与确认共用同一集合。 */
+export function getPrintableExamQuestions<T extends ExamSectionQuestion & { status: string; questionText?: string | null }>(source: T[]): T[] {
+    return source.filter((question) => question.status === 'ready' && !!question.questionText?.trim())
+        .sort((a, b) => a.order - b.order);
+}
+
 /** 打印正文、答案页和回传识别共用的过滤、排序与连续题号。 */
 export function buildExamPrintLayout<T extends ExamSectionQuestion & { status: string; questionText?: string | null }>(
     source: T[], groupByType: boolean, language: ExamSectionLanguage,
 ) {
-    const questions = source.filter((question) => question.status === 'ready' && question.questionText)
-        .sort((a, b) => a.order - b.order);
+    const questions = getPrintableExamQuestions(source);
     const sections = groupByType ? groupExamQuestions(questions, language) : null;
     const items = sections ? sections.flatMap((section) => section.items)
         : questions.map((question, index) => ({ question, displayNumber: index + 1 }));

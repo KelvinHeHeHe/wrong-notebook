@@ -8,6 +8,7 @@ import { parseAttemptRegionJson, summarizeExamAttemptScores } from '@/lib/exam/e
 import { cropAttemptAnswerImage } from '@/lib/exam/exam-attempt-image';
 import { createExamPracticeRecord } from '@/lib/exam/exam-results';
 import { normalizeExamScore } from '@/lib/exam/exam-score';
+import { getPrintableExamQuestions } from '@/lib/exam/exam-sections';
 import { findDuplicateQuestion } from '@/lib/question/question-deduplication';
 import { importSchema } from '@/lib/question/question-save';
 import { createErrorItemInTransaction } from '@/lib/question/question-write';
@@ -62,7 +63,7 @@ export function confirmExamAttempt(input: {
         if (attempt.status !== 'review' || attempt.paper.status !== 'ready') reject('EXAM_ATTEMPT_INVALID_STATUS', 409);
         const expected = new Date(input.expectedUpdatedAt);
         if (!Number.isFinite(expected.getTime()) || expected.getTime() !== attempt.updatedAt.getTime()) reject('EXAM_ATTEMPT_CHANGED', 409);
-        const questions = attempt.paper.questions;
+        const questions = getPrintableExamQuestions(attempt.paper.questions);
         if (!questions.length) reject('EXAM_ATTEMPT_NO_READY_QUESTIONS');
         const answers = new Map(attempt.answers.map((answer) => [answer.examQuestionId, answer]));
         for (const question of questions) {

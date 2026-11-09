@@ -61,6 +61,23 @@ async function fixture(consented = true) {
 }
 
 describe('纸质作答识别所有权与真实 SQLite 额度', () => {
+    it.each([false, true].flatMap((groupByType) => [null, '', ' \n\t '].map((questionText) => ({ groupByType, questionText }))))('识别仅补可打印题，人工复核后按同一题集确认：%j', async ({ groupByType, questionText }) => {
+        const input = await fixture();
+        const printed = await database.examQuestion.findFirstOrThrow();
+        await database.examPaper.update({ where: { id: printed.paperId }, data: { groupByType } });
+        await database.examQuestion.createMany({ data: [
+            { paperId: printed.paperId, order: 1, sourceShortId: 'EMPTY', status: 'ready', questionText, score: 900 },
+            { paperId: printed.paperId, order: 2, sourceShortId: 'FAILED', status: 'failed', questionText: '失败题目', score: 900 },
+        ] });
+        const recognized = await recognizeExamAttemptPages(input);
+        const answers = await database.examAttemptAnswer.findMany({ where: { attemptId: input.attemptId } });
+        expect(answers.map((answer) => answer.examQuestionId)).toEqual([printed.id]);
+        expect(answers[0]).toMatchObject({ reviewStatus: 'required', result: null });
+        await database.examAttemptAnswer.update({ where: { id: answers[0].id }, data: { reviewStatus: 'reviewed', result: 'correct', awardedScore: 5, maxScore: 5 } });
+        const result = await confirmExamAttempt({ ...input, expectedUpdatedAt: recognized.updatedAt });
+        expect(result.summary).toMatchObject({ status: 'confirmed', totalScore: 5, maxScore: 5 });
+        expect((await database.practiceRecord.findMany()).map((record) => record.examQuestionId)).toEqual([printed.id]);
+    });
     it.each([20, 21])('旧备份页归属边界 %s：保留合法页，超限页不阻塞当前识别', async (sourceOrder) => {
         const input = await fixture();
         const question = await database.examQuestion.findFirstOrThrow();
