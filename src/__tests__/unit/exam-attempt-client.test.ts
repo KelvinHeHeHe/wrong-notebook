@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '@/lib/api-client';
 import { createAndRecognizeExamAttempt, prepareExamAttemptPhotos } from '@/lib/exam/exam-attempt-client';
 import type { ExamAttemptUploadCheckpoint, ExamAttemptWorkflowDeps } from '@/lib/exam/exam-attempt-client';
 
@@ -82,5 +83,47 @@ describe('回传串行流程', () => {
         expect(deps.uploadPages).not.toHaveBeenCalled();
         await createAndRecognizeExamAttempt(input, deps);
         expect(deps.createAttempt).toHaveBeenCalledTimes(2);
+    });
+});
+
+
+describe('识别收尾 503', () => {
+    const envelope = {
+        message: 'EXAM_ATTEMPT_FINALIZE_FAILED', code: 'DATABASE_ERROR',
+        details: { phase: 'finalize', retryable: true },
+        status: 'review', updatedAt: '2026-11-09T11:00:00.001Z',
+        successes: [{ pageOrder: 1, candidateCount: 1, matchedCount: 1 }], failures: [],
+    };
+    it('真实路由的标准 503 信封保留最新 checkpoint 并返回已有作答，不重新识别', async () => {
+        const deps = dependencies();
+        const onCheckpoint = vi.fn();
+        deps.recognizePages.mockRejectedValueOnce(new ApiError(503, 'Service Unavailable', envelope));
+        const result = await createAndRecognizeExamAttempt(input, { ...deps, onCheckpoint });
+        expect(result).toMatchObject({ attemptId: 'a1', status: 'review', updatedAt: envelope.updatedAt, successes: envelope.successes, failures: [] });
+        expect(onCheckpoint).toHaveBeenLastCalledWith({ attemptId: 'a1', updatedAt: envelope.updatedAt, uploaded: true });
+        expect(deps.recognizePages).toHaveBeenCalledOnce();
+    });
+    it.each([
+        { ...envelope, updatedAt: undefined },
+        { ...envelope, updatedAt: 'not-a-date' },
+        { ...envelope, status: 'recognizing' },
+        { ...envelope, status: 'invented' },
+        { ...envelope, successes: 'invalid' },
+        { ...envelope, failures: undefined },
+        { ...envelope, details: { phase: 'finalize', retryable: false } },
+        { ...envelope, message: 'EXAM_ATTEMPT_RECOGNITION_FAILED' },
+        { ...envelope, code: 'INTERNAL_ERROR' },
+    ])('畸形或普通识别失败信封保持抛错', async (body) => {
+        const deps = dependencies();
+        const error = new ApiError(503, 'Service Unavailable', body);
+        deps.recognizePages.mockRejectedValueOnce(error);
+        await expect(createAndRecognizeExamAttempt(input, deps)).rejects.toBe(error);
+    });
+    it.each(['create', 'upload'])('%s 阶段的同形 503 不能误认成已识别', async (stage) => {
+        const deps = dependencies();
+        const error = new ApiError(503, 'Service Unavailable', envelope);
+        (stage === 'create' ? deps.createAttempt : deps.uploadPages).mockRejectedValueOnce(error);
+        await expect(createAndRecognizeExamAttempt(input, deps)).rejects.toBe(error);
+        expect(deps.recognizePages).not.toHaveBeenCalled();
     });
 });

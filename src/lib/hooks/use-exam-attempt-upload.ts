@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { apiClient } from '@/lib/api-client';
@@ -12,36 +12,56 @@ import type { CreateExamAttemptInput } from '@/lib/schemas/exam-attempt';
 import type { ExamAttemptVersion } from '@/types/api';
 
 type UploadPhase = 'idle' | 'preparing' | 'ready' | 'creating' | 'uploading' | 'recognizing' | 'error' | 'complete';
+interface UploadState {
+    pages: PreparedExamAttemptPhoto[];
+    phase: UploadPhase;
+    error: string | null;
+    attemptId: string | null;
+}
+const EMPTY_STATE: UploadState = { pages: [], phase: 'idle', error: null, attemptId: null };
 
 export function useExamAttemptUpload(paperId: string, language: 'zh' | 'en') {
     const router = useRouter();
-    const [pages, setPages] = useState<PreparedExamAttemptPhoto[]>([]);
-    const [phase, setPhase] = useState<UploadPhase>('idle');
-    const [error, setError] = useState<string | null>(null);
-    const [attemptId, setAttemptId] = useState<string | null>(null);
+    const [state, setState] = useState<UploadState>(EMPTY_STATE);
+    const { pages, phase } = state;
     const checkpoint = useRef<ExamAttemptUploadCheckpoint | undefined>(undefined);
     const locked = useRef(false);
+    const mounted = useRef(false);
+    const operationId = useRef(0);
+
+    useEffect(() => {
+        mounted.current = true;
+        operationId.current += 1;
+        checkpoint.current = undefined;
+        locked.current = false;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- 试卷身份变化时清空上一份作答，防止复用旧照片与异步结果
+        setState(EMPTY_STATE);
+        return () => { mounted.current = false; operationId.current += 1; };
+    }, [paperId]);
+
+    const isCurrent = (operation: number) => mounted.current && operationId.current === operation;
+    const patchState = (patch: Partial<UploadState>) => setState((current) => ({ ...current, ...patch }));
 
     const prepareFiles = async (files: File[]) => {
-        if (locked.current || checkpoint.current) return;
+        if (!mounted.current || locked.current || checkpoint.current) return;
+        const operation = ++operationId.current;
         locked.current = true;
-        setPhase('preparing');
-        setError(null);
+        patchState({ phase: 'preparing', error: null });
         try {
-            setPages(await prepareExamAttemptPhotos(files));
-            setPhase('ready');
+            const prepared = await prepareExamAttemptPhotos(files);
+            if (!isCurrent(operation)) return;
+            patchState({ pages: prepared, phase: 'ready' });
         } catch (cause) {
-            setPages([]);
-            setError(getErrorMessage(cause));
-            setPhase('error');
+            if (!isCurrent(operation)) return;
+            patchState({ pages: [], error: getErrorMessage(cause), phase: 'error' });
         } finally {
-            locked.current = false;
+            if (isCurrent(operation)) locked.current = false;
         }
     };
 
-    const reorder = (next: PreparedExamAttemptPhoto[]) => setPages(next.map((page, index) => ({ ...page, order: index + 1 })));
+    const reorder = (next: PreparedExamAttemptPhoto[]) => patchState({ pages: next.map((page, index) => ({ ...page, order: index + 1 })) });
     const movePage = (index: number, offset: -1 | 1) => {
-        if (locked.current || checkpoint.current) return;
+        if (!mounted.current || locked.current || checkpoint.current) return;
         const target = index + offset;
         if (target < 0 || target >= pages.length) return;
         const next = [...pages];
@@ -49,46 +69,54 @@ export function useExamAttemptUpload(paperId: string, language: 'zh' | 'en') {
         reorder(next);
     };
     const removePage = (index: number) => {
-        if (!locked.current && !checkpoint.current) reorder(pages.filter((_, current) => current !== index));
+        if (mounted.current && !locked.current && !checkpoint.current) reorder(pages.filter((_, current) => current !== index));
     };
 
     const submit = async (metadata: CreateExamAttemptInput) => {
-        if (locked.current || pages.length === 0) return;
+        if (!mounted.current || locked.current || pages.length === 0) return;
+        const operation = ++operationId.current;
+        const assertActive = () => {
+            if (!isCurrent(operation)) throw new Error('EXAM_ATTEMPT_OPERATION_CANCELLED');
+        };
         locked.current = true;
         let completed = false;
-        setPhase(checkpoint.current ? 'uploading' : 'creating');
-        setError(null);
+        patchState({ phase: checkpoint.current ? 'uploading' : 'creating', error: null });
         try {
             const result = await createAndRecognizeExamAttempt({ paperId, language, pages, ...metadata, checkpoint: checkpoint.current }, {
-                createAttempt: (id, input) => apiClient.post(`/api/exams/${id}/attempts`, input),
-                getAttempt: (id) => apiClient.get<ExamAttemptVersion>(`/api/exam-attempts/${id}`),
+                assertActive,
+                createAttempt: (id, input) => { assertActive(); return apiClient.post(`/api/exams/${id}/attempts`, input); },
+                getAttempt: (id) => { assertActive(); return apiClient.get<ExamAttemptVersion>(`/api/exam-attempts/${id}`); },
                 uploadPages: (id, input) => {
-                    setPhase('uploading');
+                    assertActive();
+                    patchState({ phase: 'uploading' });
                     return apiClient.post(`/api/exam-attempts/${id}/pages`, input);
                 },
                 recognizePages: (id, input) => {
-                    setPhase('recognizing');
+                    assertActive();
+                    patchState({ phase: 'recognizing' });
                     return apiClient.post(`/api/exam-attempts/${id}/recognize`, input, { recoverable: true, timeout: 600_000 });
                 },
                 onCheckpoint: (value) => {
+                    assertActive();
                     checkpoint.current = value;
-                    setAttemptId(value.attemptId);
+                    patchState({ attemptId: value.attemptId });
                 },
             });
+            assertActive();
             completed = true;
-            setPhase('complete');
+            patchState({ phase: 'complete' });
             router.push(`/exam-attempts/${result.attemptId}`);
         } catch (cause) {
+            if (!isCurrent(operation)) return;
             const message = getApiErrorMessage(cause) ?? getErrorMessage(cause);
-            setError(message);
-            setPhase('error');
+            patchState({ error: message, phase: 'error' });
             // 网络错误可能携带请求正文；仅记录固定错误码，不记录照片、答案或异常原文。
             frontendLogger.error('[ExamAttemptUpload]', '纸质作答回传失败', { errorCode: 'EXAM_ATTEMPT_UPLOAD_FAILED' });
         } finally {
-            if (!completed) locked.current = false;
+            if (isCurrent(operation) && !completed) locked.current = false;
         }
     };
 
     const busy = ['preparing', 'creating', 'uploading', 'recognizing', 'complete'].includes(phase);
-    return { pages, phase, busy, error, attemptId, prepareFiles, movePage, removePage, submit };
+    return { ...state, busy, prepareFiles, movePage, removePage, submit };
 }

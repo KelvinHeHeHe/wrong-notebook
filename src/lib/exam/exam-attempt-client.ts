@@ -1,3 +1,6 @@
+import { z } from 'zod';
+
+import { ApiError } from '@/lib/api-client';
 import { prepareImage, renderRegion } from '@/lib/image-pipeline';
 import { MAX_IMPORTED_EXAM_PAGES } from '@/lib/schemas/exam';
 import type { CreateExamAttemptInput, UpsertExamAttemptPagesInput } from '@/lib/schemas/exam-attempt';
@@ -33,6 +36,7 @@ export interface ExamAttemptWorkflowDeps {
     uploadPages: (attemptId: string, input: UpsertExamAttemptPagesInput) => Promise<ExamAttemptVersion>;
     recognizePages: (attemptId: string, input: { expectedUpdatedAt: string; pageOrders: number[]; language: 'zh' | 'en' }) => Promise<ExamAttemptRecognitionResponse>;
     getAttempt: (attemptId: string) => Promise<ExamAttemptVersion>;
+    assertActive?: () => void;
     onCheckpoint?: (checkpoint: ExamAttemptUploadCheckpoint) => void;
 }
 
@@ -42,6 +46,17 @@ interface ExamAttemptWorkflowInput extends CreateExamAttemptInput {
     pages: PreparedExamAttemptPhoto[];
     checkpoint?: ExamAttemptUploadCheckpoint;
 }
+
+// 沿用 Task 5 路由的顶层结果及 details 标记，拒绝缺失版本或仍在识别中的信封。
+const finalizeResponseSchema = z.object({
+    message: z.literal('EXAM_ATTEMPT_FINALIZE_FAILED'),
+    code: z.literal('DATABASE_ERROR'),
+    details: z.object({ phase: z.literal('finalize'), retryable: z.literal(true) }),
+    status: z.enum(['review', 'failed', 'confirmed']),
+    updatedAt: z.string().datetime({ offset: true }),
+    successes: z.array(z.object({ pageOrder: z.number().int().min(1).max(MAX_IMPORTED_EXAM_PAGES), candidateCount: z.number().int().min(0), matchedCount: z.number().int().min(0) })),
+    failures: z.array(z.object({ pageOrder: z.number().int().min(1).max(MAX_IMPORTED_EXAM_PAGES), error: z.string().min(1) })),
+});
 
 const IMAGE_FILE_PATTERN = /\.(?:avif|gif|heic|heif|jpe?g|png|webp)$/i;
 
@@ -76,15 +91,19 @@ export async function prepareExamAttemptPhotos(
 
 /** 每一步保存服务端版本；失败后可从已知创建结果继续，不重复创建作答。 */
 export async function createAndRecognizeExamAttempt(input: ExamAttemptWorkflowInput, deps: ExamAttemptWorkflowDeps) {
+    const assertActive = () => deps.assertActive?.();
+    assertActive();
     let checkpoint = input.checkpoint;
     if (checkpoint) {
         // 上传响应丢失也可能已经写入；重试前读取当前版本，不能推算时间戳。
         const latest = await deps.getAttempt(checkpoint.attemptId);
+        assertActive();
         checkpoint = { ...checkpoint, updatedAt: latest.updatedAt };
         deps.onCheckpoint?.(checkpoint);
     } else {
         const created = await deps.createAttempt(input.paperId, { takenAt: input.takenAt, ...(input.comment ? { comment: input.comment } : {}) });
-        checkpoint = { ...created, uploaded: false };
+        assertActive();
+        checkpoint = { attemptId: created.attemptId, updatedAt: created.updatedAt, uploaded: false };
         deps.onCheckpoint?.(checkpoint);
     }
     if (!checkpoint.uploaded) {
@@ -92,14 +111,27 @@ export async function createAndRecognizeExamAttempt(input: ExamAttemptWorkflowIn
             expectedUpdatedAt: checkpoint.updatedAt,
             pages: input.pages.map(({ sourceName: _sourceName, ...page }) => page),
         });
+        assertActive();
         checkpoint = { ...checkpoint, updatedAt: uploaded.updatedAt, uploaded: true };
         deps.onCheckpoint?.(checkpoint);
     }
-    const recognition = await deps.recognizePages(checkpoint.attemptId, {
-        expectedUpdatedAt: checkpoint.updatedAt,
-        pageOrders: input.pages.map((page) => page.order),
-        language: input.language,
-    });
+    let recognition: ExamAttemptRecognitionResponse;
+    try {
+        recognition = await deps.recognizePages(checkpoint.attemptId, {
+            expectedUpdatedAt: checkpoint.updatedAt,
+            pageOrders: input.pages.map((page) => page.order),
+            language: input.language,
+        });
+    } catch (cause) {
+        assertActive();
+        // 仅收尾失败的标准信封代表已有可复核结果；不能把其他 503 当作识别成功。
+        const recovered = cause instanceof ApiError && cause.status === 503 && checkpoint.attemptId.trim()
+            ? finalizeResponseSchema.safeParse(cause.data)
+            : null;
+        if (!recovered?.success) throw cause;
+        recognition = recovered.data;
+    }
+    assertActive();
     deps.onCheckpoint?.({ ...checkpoint, updatedAt: recognition.updatedAt });
     return { attemptId: checkpoint.attemptId, ...recognition };
 }
