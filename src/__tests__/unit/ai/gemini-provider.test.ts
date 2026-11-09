@@ -63,6 +63,16 @@ describe('Gemini 试卷答案提取重试日志', () => {
 
     afterEach(() => vi.useRealTimers());
 
+    it('真实判分经 SDK 重试时也不记录学生作答或题干回显', async () => {
+        const provider = new GeminiProvider({ apiKey: 'test-key' });
+        mockGenerateContent.mockRejectedValueOnce(new Error('503 保密学生作答 保密题干')).mockResolvedValueOnce({ text: '{"correct":true,"reason":"保密学生作答"}' });
+        const result = provider.gradeAnswer({ questionText: '保密题干', answerText: '标准答案', userAnswer: '保密学生作答' });
+        await vi.runAllTimersAsync();
+        await expect(result).resolves.toMatchObject({ correct: true });
+        expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+        expect(JSON.stringify(Object.values(mockLogger).flatMap((method) => method.mock.calls))).not.toMatch(/保密学生作答|保密题干/);
+    });
+
     describe.each([
         ['503 unavailable', 'AI_SERVICE_UNAVAILABLE'],
         ['network unreachable', 'AI_CONNECTION_FAILED'],

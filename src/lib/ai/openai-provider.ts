@@ -3,7 +3,7 @@ import type { ChatCompletion } from "openai/resources/chat/completions";
 import type { AIService, AIConfig } from "./types";
 import type { CompletionRequest } from './base-provider';
 import type { CompletionResult } from './completion';
-import { compactUsage, readRequestId } from './completion';
+import { compactUsage, completionErrorCode, readRequestId } from './completion';
 import { BaseAIProvider } from './base-provider';
 import { createLogger } from '../logger';
 import { AI_OUTPUT_TRUNCATED, withModelOutputLimit } from './truncation';
@@ -237,8 +237,8 @@ export class OpenAIProvider extends BaseAIProvider implements AIService {
         }
     }
 
-    protected handleError(error: unknown): void {
-        logger.error({ error }, 'OpenAI error');
+    protected handleError(error: unknown, privateContent = false): void {
+        logger.error(privateContent ? { errorCode: completionErrorCode(error) } : { error }, 'OpenAI error');
         if (error instanceof Error) {
             // 已经归类的错误码原样透传，避免再次归类时丢失（如 AI_AUTH_ERROR 被当成未知错误）
             if (error.message === AI_OUTPUT_TRUNCATED || isAIErrorCode(error.message)) {

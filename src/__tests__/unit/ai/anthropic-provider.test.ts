@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
     }
     return {
         create: vi.fn(),
+        log: vi.fn(),
         clientOptions: [] as unknown[],
         APIError,
         APIConnectionError,
@@ -47,7 +48,7 @@ vi.mock('@anthropic-ai/sdk', async () => {
 });
 
 vi.mock('@/lib/logger', () => ({
-    createLogger: vi.fn(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), box: vi.fn(), divider: vi.fn() })),
+    createLogger: vi.fn(() => ({ debug: mocks.log, info: mocks.log, warn: mocks.log, error: mocks.log, box: mocks.log, divider: mocks.log })),
 }));
 
 vi.mock('@/lib/config', () => ({
@@ -208,6 +209,16 @@ describe('AnthropicProvider', () => {
         const provider = new AnthropicProvider({ apiKey: 'sk-ant' });
 
         await expect(provider.generateSimilarQuestion('2+3', ['加法'])).rejects.toThrow(code);
+    });
+
+    it('判分脱敏仍保留 SDK 状态映射，Provider 日志不暴露回显或异常 cause', async () => {
+        mocks.create.mockRejectedValueOnce(new mocks.APIError(401, '保密学生作答 保密题干'));
+        const provider = new AnthropicProvider({ apiKey: 'sk-ant' });
+        const result = provider.gradeAnswer({ questionText: '保密题干', answerText: '标准答案', userAnswer: '保密学生作答' });
+        await expect(result).rejects.toThrow('AI_AUTH_ERROR');
+        await expect(result).rejects.not.toHaveProperty('cause');
+        const logs = JSON.stringify(mocks.log.mock.calls, (_key, value: unknown) => value instanceof Error ? { message: value.message, stack: value.stack, cause: value.cause } : value);
+        expect(logs).not.toMatch(/保密题干|保密学生作答/);
     });
 
     it('回复缺少必需标签时报 AI_RESPONSE_ERROR', async () => {

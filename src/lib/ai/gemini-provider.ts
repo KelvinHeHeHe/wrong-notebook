@@ -135,7 +135,7 @@ export class GeminiProvider extends BaseAIProvider {
 
                 const delay = Math.pow(2, attempt - 1) * 1000; // Exponential backoff: 1s, 2s, 4s
                 // 答案提取的上游错误可能回显图片或学生作答，只保留标准错误码。
-                const errorMetadata = task === 'exam-answer-extraction' ? { errorCode: completionErrorCode(error) } : { error: msg };
+                const errorMetadata = task === 'exam-answer-extraction' || task === 'grading' ? { errorCode: completionErrorCode(error) } : { error: msg };
                 logger.warn({ attempt, maxRetries, ...errorMetadata, nextRetryDelayMs: delay }, 'Gemini operation failed, retrying...');
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
@@ -143,11 +143,11 @@ export class GeminiProvider extends BaseAIProvider {
         throw lastError;
     }
 
-    protected handleError(error: unknown): void {
+    protected handleError(error: unknown, privateContent = false): void {
         // AI_OUTPUT_TRUNCATED 由 complete 抛出，需原样透传（基类默认实现不透传）
         if (error instanceof Error && error.message === AI_OUTPUT_TRUNCATED) {
             throw error;
         }
-        super.handleError(error);
+        super.handleError(error, privateContent);
     }
 }

@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { AIConfig } from "./types";
 import type { CompletionRequest } from './base-provider';
 import type { CompletionResult, CompletionUsage } from './completion';
-import { compactUsage, readRequestId } from './completion';
+import { compactUsage, completionErrorCode, readRequestId } from './completion';
 import { BaseAIProvider } from './base-provider';
 import { createLogger } from '../logger';
 import { trimTrailingSlashes } from '../utils';
@@ -157,8 +157,8 @@ export class AnthropicProvider extends BaseAIProvider {
         return { text: response.text, usage: response.usage, model: response.model || undefined, requestId };
     }
 
-    protected handleError(error: unknown): void {
-        logger.error({ error }, 'Anthropic error');
+    protected handleError(error: unknown, privateContent = false): void {
+        logger.error(privateContent ? { errorCode: completionErrorCode(error) } : { error }, 'Anthropic error');
         // 已经归类的错误码原样透传，避免再次归类时丢失（如 MiniMax Code 登录失效被当成未知错误）
         if (error instanceof Error && (error.message === 'AI_OUTPUT_TRUNCATED' || isAIErrorCode(error.message))) {
             throw error;

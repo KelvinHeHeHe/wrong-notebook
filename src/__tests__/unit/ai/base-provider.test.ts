@@ -80,7 +80,20 @@ describe('BaseAIProvider', () => {
     let provider: TestProvider;
 
     beforeEach(() => {
+        vi.clearAllMocks();
         provider = new TestProvider();
+    });
+
+    it('真实判分路径不记录模型回复或上游错误中的题干和学生答案', async () => {
+        const input = { questionText: '保密题干全文', answerText: '保密标准答案', userAnswer: '保密学生作答' };
+        provider.observeCompletions(() => { throw new Error('观察者失败 ' + input.userAnswer); });
+        provider.completeText.mockResolvedValueOnce(JSON.stringify({ correct: true, reason: input.userAnswer }));
+        await expect(provider.gradeAnswer(input)).resolves.toEqual({ correct: true, reason: input.userAnswer });
+        provider.completeText.mockRejectedValueOnce(new Error('network ' + Object.values(input).join(' ')));
+        await expect(provider.gradeAnswer(input)).rejects.toThrow('AI_CONNECTION_FAILED');
+        const logs = JSON.stringify(Object.values(mockLogger).flatMap((method) => method.mock.calls), (_key, value: unknown) => value instanceof Error ? { message: value.message, stack: value.stack, cause: value.cause } : value);
+        for (const privateText of Object.values(input)) expect(logs).not.toContain(privateText);
+        expect(mockLogger.error).toHaveBeenCalledWith(expect.objectContaining({ code: 'AI_CONNECTION_FAILED' }), expect.any(String));
     });
 
     describe('extractExamPageAnswers', () => {

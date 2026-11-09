@@ -12,6 +12,7 @@ import { resolveProviderAssignment, routeRole } from "./routing";
 import type { AiRouteRole } from "./routing";
 import type { AiProviderId, AppConfig } from "../config/types";
 import type { CompletionObserver } from "./completion";
+import { completionErrorCode } from "./completion";
 import type { AiCallScope } from "./usage";
 import type { AiAccountProvider, AiProviderOverride } from "./account";
 import { getAiAccountProvider } from "./account-provider";
@@ -94,7 +95,7 @@ function createRoutedService(account: AiAccountProvider, scope: AiCallScope, con
         } catch (error) {
             if (!assignment.fallback || !isFallbackError(error)) throw error;
             logger.warn(
-                { error, userId: scope.userId, kind: scope.kind, method, from: assignment.primary, to: assignment.fallback },
+                { errorCode: completionErrorCode(error), userId: scope.userId, kind: scope.kind, method, from: assignment.primary, to: assignment.fallback },
                 'AI channel failed, trying fallback channel',
             );
             return callMethod(channel(assignment.fallback), method, args);
@@ -112,7 +113,8 @@ function createRoutedService(account: AiAccountProvider, scope: AiCallScope, con
 /** 每次补全结束后把用量交给 AI 账户实现；失败只记日志，不影响调用 */
 function observe(service: ObservableAIService, account: AiAccountProvider, scope: AiCallScope, provider: string): void {
     service.observeCompletions((event) => account.record(scope, provider, event).catch((error: unknown) => {
-        logger.error({ error, userId: scope.userId, kind: scope.kind }, 'AI account failed to record completion');
+        const metadata = event.task === 'grading' || event.task === 'exam-answer-extraction' ? { errorCode: completionErrorCode(error) } : { error };
+        logger.error({ ...metadata, userId: scope.userId, kind: scope.kind }, 'AI account failed to record completion');
     }));
 }
 

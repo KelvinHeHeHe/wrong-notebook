@@ -27,7 +27,8 @@ import { getStoredResponse } from '@/lib/recoverable-response';
 const initial = new Date('2026-11-08T00:00:00Z');
 const question = (order: number, overrides = {}) => ({
     id: `q${order}`, order, sourceShortId: `SHORT${order}`, questionText: `秘密题干${order}`,
-    answerText: '标准答案全文', analysis: '解析', questionType: 'choice', score: 5, ...overrides,
+    answerText: '标准答案全文', analysis: '解析', questionType: 'single_choice', score: 5,
+    status: 'ready', errorItem: null as { questionType: string | null } | null, ...overrides,
 });
 const page = (order: number) => ({
     id: `p${order}`, order, checksum: `checksum${order}`, imageData: `data:image/png;base64,c2VjcmV0${order}`,
@@ -46,7 +47,7 @@ const answer = (overrides: Partial<ExamAttemptAnswer> = {}): ExamAttemptAnswer =
 let state: ReturnType<typeof fixture>;
 function fixture() {
     return { id: 'a', userId: 'u', status: 'uploaded', updatedAt: initial,
-        pages: [page(1), page(2)], paper: { questions: [question(1), question(2), question(3)] },
+        pages: [page(1), page(2)], paper: { groupByType: false, questions: [question(1), question(2), question(3)] },
         answers: [] as ExamAttemptAnswer[] };
 }
 const params = { params: Promise.resolve({ id: 'a' }) };
@@ -86,11 +87,19 @@ describe('纸质作答按页识别与独立判分', () => {
         mocks.answerDelete.mockImplementation(async ({ where }) => {
             state.answers = state.answers.filter((item) => !where.id.in.includes(item.id) || item.reviewStatus === 'reviewed');
         });
-        mocks.transaction.mockImplementation(async (callback) => callback({
-            examAttempt: { findUnique: mocks.find, updateMany: mocks.lock },
-            examAttemptPage: { update: mocks.pageUpdate },
-            examAttemptAnswer: { create: mocks.answerCreate, updateMany: mocks.answerUpdate, deleteMany: mocks.answerDelete },
-        }));
+        mocks.transaction.mockImplementation(async (callback) => {
+            const before = structuredClone(state);
+            try {
+                return await callback({
+                    examAttempt: { findUnique: mocks.find, updateMany: mocks.lock },
+                    examAttemptPage: { update: mocks.pageUpdate },
+                    examAttemptAnswer: { create: mocks.answerCreate, updateMany: mocks.answerUpdate, deleteMany: mocks.answerDelete },
+                });
+            } catch (error) {
+                state = before;
+                throw error;
+            }
+        });
         mocks.quota.mockResolvedValue(null);
         mocks.service.mockResolvedValue({ extractExamPageAnswers: mocks.extract, gradeAnswer: mocks.grade });
         mocks.extract.mockResolvedValue({ candidates: [candidate(1)] });
@@ -113,6 +122,27 @@ describe('纸质作答按页识别与独立判分', () => {
         expect(mocks.quota).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'u' }), 'grade');
         expect(mocks.service).toHaveBeenCalledExactlyOnceWith({ userId: 'u', kind: 'grade' });
         expect(JSON.stringify(mocks.log.mock.calls)).not.toMatch(/c2VjcmV0|学生答案全文|秘密题干|标准答案全文/);
+    });
+
+    it.each([false, true])('按实际打印布局匹配题号，包含过滤、零基 order 和题型回退：group=%s', async (groupByType) => {
+        state.paper.groupByType = groupByType;
+        state.paper.questions = [
+            question(1, { order: 0, questionType: 'solution' }),
+            question(2, { order: 3, status: 'failed' }),
+            question(3, { order: 7, questionType: null, errorItem: { questionType: 'single_choice' } }),
+            question(4, { order: 9, questionText: null }),
+        ];
+        mocks.extract.mockResolvedValueOnce({ candidates: [candidate(1, { sourceShortId: null })] });
+        await run({ pageOrders: [1] });
+        expect(mocks.extract.mock.calls[0][0].questions.map((item: { id: string; displayNumber: number }) => [item.id, item.displayNumber])).toEqual(groupByType ? [['q3', 1], ['q1', 2]] : [['q1', 1], ['q3', 2]]);
+        expect(state.answers.find((item) => item.recognizedAnswer === '学生答案全文')?.examQuestionId).toBe(groupByType ? 'q3' : 'q1');
+        expect(state.answers.map((item) => item.examQuestionId).sort()).toEqual(['q1', 'q3']);
+    });
+
+    it('打印题型快照缺失时，复核判定同样使用关联错题的主观题型', async () => {
+        state.paper.questions = [question(1, { questionType: null, errorItem: { questionType: 'solution' } })];
+        await run({ pageOrders: [1] });
+        expect(state.answers[0].reviewStatus).toBe('required');
     });
 
     it('未作答、缺标准答案不判分，低置信度与主观题强制复核', async () => {
@@ -151,6 +181,32 @@ describe('纸质作答按页识别与独立判分', () => {
         expect(state.answers[0]).toMatchObject(replaceReviewed
             ? { recognizedAnswer: '学生答案全文', result: 'correct', awardedScore: 5, reviewStatus: 'pending' }
             : { recognizedAnswer: '旧答案', awardedScore: 2, reviewStatus: 'reviewed' });
+    });
+
+    it.each([
+        { orders: [1, 2], replaceReviewed: false }, { orders: [2, 1], replaceReviewed: false },
+        { orders: [1, 2], replaceReviewed: true }, { orders: [2, 1], replaceReviewed: true },
+    ])('同次请求跨页重复候选只由首个合法页认领：%j', async ({ orders, replaceReviewed }) => {
+        mocks.extract.mockImplementation(async ({ imageBase64 }: { imageBase64: string }) => ({
+            candidates: [candidate(1, { recognizedAnswer: imageBase64.endsWith('1') ? '第一页作答' : '第二页作答' })],
+        }));
+        const response = await run({ pageOrders: orders, replaceReviewed });
+        expect(await response.json()).toMatchObject({ successes: [
+            { pageOrder: orders[0], matchedCount: 1 }, { pageOrder: orders[1], matchedCount: 0 },
+        ] });
+        const saved = state.answers.find((item) => item.examQuestionId === 'q1')!;
+        expect(saved.recognizedAnswer).toBe(orders[0] === 1 ? '第一页作答' : '第二页作答');
+        expect(JSON.parse(saved.regionJson!).pageOrder).toBe(orders[0]);
+        expect(JSON.parse(state.pages.find((item) => item.order === orders[1])!.recognitionResult!).candidates).toHaveLength(1);
+        expect(mocks.grade).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([false, true])('其他页已认领的人工答案即使 replaceReviewed=%s 也不覆盖', async (replaceReviewed) => {
+        state.answers = [answer({ regionJson: JSON.stringify({ pageOrder: 2, candidateId: 'p2', regions: [] }) })];
+        await run({ pageOrders: [1], replaceReviewed });
+        expect(state.answers[0]).toMatchObject({ recognizedAnswer: '旧答案', reviewStatus: 'reviewed', awardedScore: 2 });
+        expect(mocks.grade).not.toHaveBeenCalled();
+        expect(JSON.parse(state.pages[0].recognitionResult!).candidates).toHaveLength(1);
     });
 
     it.each(['page', 'patch', 'confirm'])('提取期间并发修改拒绝迟到结果：%s', async (change) => {
@@ -245,6 +301,36 @@ describe('纸质作答按页识别与独立判分', () => {
         expect(mocks.service).not.toHaveBeenCalled();
     });
 
+    it('相同版本的并发请求只有 CAS 所有者扣费一次', async () => {
+        const responses = await Promise.all([run({ pageOrders: [1] }), run({ pageOrders: [1] })]);
+        expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+        expect(mocks.quota).toHaveBeenCalledTimes(1);
+        expect(mocks.service).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['review', 'recognizing'])('额度拒绝安全释放识别所有权并返回可重试的新版本：原状态 %s', async (status) => {
+        state.status = status;
+        mocks.quota.mockResolvedValueOnce(Response.json({ message: '额度不足', code: 'AI_QUOTA_INSUFFICIENT' }, { status: 429 }));
+        const response = await run({ pageOrders: [1] });
+        expect(response.status).toBe(429);
+        const body = await response.json();
+        expect(body).toMatchObject({ code: 'AI_QUOTA_INSUFFICIENT', status: status === 'recognizing' ? 'uploaded' : 'review', updatedAt: state.updatedAt.toISOString() });
+        expect(state.status).not.toBe('recognizing');
+        expect(state.updatedAt.getTime()).toBeGreaterThan(initial.getTime());
+        expect((await run({ pageOrders: [1], expectedUpdatedAt: body.updatedAt })).status).toBe(200);
+    });
+
+    it('额度拒绝恢复时不能撤销并发确认', async () => {
+        mocks.quota.mockImplementationOnce(async () => {
+            state.status = 'confirmed';
+            state.updatedAt = new Date(state.updatedAt.getTime() + 1);
+            return Response.json({ code: 'AI_QUOTA_INSUFFICIENT' }, { status: 429 });
+        });
+        expect((await run({ pageOrders: [1] })).status).toBe(429);
+        expect(state.status).toBe('confirmed');
+        expect(mocks.service).not.toHaveBeenCalled();
+    });
+
     it('开始时乐观锁失败不调用 AI', async () => {
         mocks.lock.mockResolvedValueOnce({ count: 0 });
         expect((await run()).status).toBe(409);
@@ -294,9 +380,110 @@ describe('纸质作答按页识别与独立判分', () => {
     it('持久化异常的日志和 HTTP 响应不泄露图片、题干或答案', async () => {
         mocks.pageUpdate.mockRejectedValueOnce(new Error('c2VjcmV0 学生答案全文 秘密题干 标准答案全文'));
         const response = await run({ pageOrders: [1] });
-        expect(response.status).toBe(500);
-        expect(await response.json()).toMatchObject({ message: 'EXAM_ATTEMPT_RECOGNITION_FAILED' });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ failures: [{ pageOrder: 1, error: 'EXAM_PAGE_SAVE_FAILED' }] });
         expect(JSON.stringify(mocks.log.mock.calls)).not.toMatch(/c2VjcmV0|学生答案全文|秘密题干|标准答案全文/);
+    });
+
+    it.each(['page', 'answer'])('第一页 %s 写入失败转页失败并继续保存第二页，事务不留下半成品', async (write) => {
+        mocks.extract.mockResolvedValueOnce({ candidates: [candidate(1)] }).mockResolvedValueOnce({ candidates: [candidate(2)] });
+        if (write === 'page') mocks.pageUpdate.mockRejectedValueOnce(new Error('数据库写入失败'));
+        else mocks.answerCreate.mockRejectedValueOnce(new Error('答案写入失败'));
+        const response = await run();
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ failures: [{ pageOrder: 1, error: 'EXAM_PAGE_SAVE_FAILED' }], successes: [{ pageOrder: 2, matchedCount: 1 }], status: 'review' });
+        expect(JSON.parse(state.pages[0].recognitionResult!)).toMatchObject({ status: 'failed', errorCode: 'EXAM_PAGE_SAVE_FAILED' });
+        expect(JSON.parse(state.pages[1].recognitionResult!)).toMatchObject({ status: 'succeeded' });
+        expect(state.answers.find((item) => item.examQuestionId === 'q1')).toMatchObject({ recognizedAnswer: null, result: null, awardedScore: null, reviewStatus: 'required' });
+        expect(state.answers.find((item) => item.examQuestionId === 'q2')).toMatchObject({ result: 'correct', awardedScore: 5 });
+    });
+
+    it('所有页图写入持续失败时仍结束为 failed，不遗留 recognizing', async () => {
+        mocks.pageUpdate.mockRejectedValue(new Error('数据库写入失败'));
+        const response = await run();
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ status: 'failed', successes: [], failures: [
+            { pageOrder: 1, error: 'EXAM_PAGE_SAVE_FAILED' }, { pageOrder: 2, error: 'EXAM_PAGE_SAVE_FAILED' },
+        ] });
+        expect(state.status).toBe('failed');
+    });
+
+    it('答案写入和占位持续失败时仍释放 recognizing 并保留可复核页材料', async () => {
+        mocks.answerCreate.mockRejectedValue(new Error('答案表持续写入失败'));
+        const response = await run({ pageOrders: [1] });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ status: 'review', failures: [{ pageOrder: 1, error: 'EXAM_PAGE_SAVE_FAILED' }] });
+        expect(JSON.parse(state.pages[0].recognitionResult!).candidates).toHaveLength(1);
+        expect(state.status).toBe('review');
+        expect(state.answers).toHaveLength(0);
+    });
+
+    it.each([false, true])('过滤退化区域后保留合法来源引用，全部过滤=%s', async (allInvalid) => {
+        const valid = { x: 0.1, y: 0.2, width: 0.3, height: 0.4 };
+        mocks.extract.mockResolvedValueOnce({ candidates: [candidate(1, { regions: [
+            { x: 1, y: 0, width: 0, height: 0.5 }, { x: 0, y: 1, width: 0.5, height: 0 },
+            ...(!allInvalid ? [valid] : []),
+        ] })] });
+        await run({ pageOrders: [1] });
+        const saved = state.answers.find((item) => item.examQuestionId === 'q1')!;
+        expect(JSON.parse(saved.regionJson!)).toEqual({ pageOrder: 1, candidateId: expect.any(String), regions: allInvalid ? [] : [valid] });
+        expect(JSON.parse(state.pages[0].recognitionResult!).candidates[0].regions).toEqual(allInvalid ? [] : [valid]);
+    });
+
+    it('重试能从旧坏区域中恢复页归属，清除旧 pending 和评分', async () => {
+        state.answers = [answer({ reviewStatus: 'pending', gradingSource: 'ai', regionJson: JSON.stringify({
+            pageOrder: 1, candidateId: 'old', regions: [{ x: 1, y: 0, width: 0, height: 0.5 }],
+        }) })];
+        mocks.extract.mockResolvedValueOnce({ candidates: [] });
+        await run({ pageOrders: [1] });
+        expect(state.answers.find((item) => item.examQuestionId === 'q1')).toMatchObject({ result: null, awardedScore: null, recognizedAnswer: null, reviewStatus: 'required', regionJson: null });
+    });
+
+    it('旧坏区域仍可保护其他页认领的答案，不允许显式替换越页', async () => {
+        state.answers = [answer({ reviewStatus: 'pending', regionJson: JSON.stringify({
+            pageOrder: 2, candidateId: 'old', regions: [{ x: 1, y: 0, width: 0, height: 0.5 }],
+        }) })];
+        await run({ pageOrders: [1], replaceReviewed: true });
+        expect(state.answers[0]).toMatchObject({ recognizedAnswer: '旧答案', awardedScore: 2 });
+        expect(mocks.grade).not.toHaveBeenCalled();
+    });
+
+    it('同 checksum 的失败重试保留未匹配候选，重复失败后仍有材料可复核', async () => {
+        const unmatched = { ...candidate(1, { sourceShortId: 'UNKNOWN', displayNumber: null }), candidateId: 'unmatched-v1' };
+        state.pages[0].recognitionResult = JSON.stringify({ version: 1, status: 'succeeded', candidates: [unmatched], errorCode: null, completedAt: initial.toISOString() });
+        mocks.extract.mockRejectedValue(new Error('AI_TIMEOUT_ERROR'));
+        for (let index = 0; index < 2; index += 1) {
+            const response = await run({ pageOrders: [1] });
+            expect(await response.json()).toMatchObject({ status: 'review', failures: [{ pageOrder: 1, error: 'AI_TIMEOUT_ERROR' }] });
+            expect(JSON.parse(state.pages[0].recognitionResult!)).toMatchObject({ status: 'failed', errorCode: 'AI_TIMEOUT_ERROR', candidates: [unmatched] });
+        }
+    });
+
+    it('失败重试保留旧候选 ID 与答案，同时过滤旧信封的退化区域', async () => {
+        state.pages[0].recognitionResult = JSON.stringify({ version: 1, status: 'succeeded', candidates: [{
+            ...candidate(1, { regions: [{ x: 1, y: 0, width: 0, height: 0.5 }] }), candidateId: 'legacy-candidate',
+        }], errorCode: null, completedAt: initial.toISOString() });
+        mocks.extract.mockRejectedValueOnce(new Error('AI_TIMEOUT_ERROR'));
+        await run({ pageOrders: [1] });
+        expect(JSON.parse(state.pages[0].recognitionResult!).candidates[0]).toMatchObject({ candidateId: 'legacy-candidate', recognizedAnswer: '学生答案全文', regions: [] });
+    });
+
+    it.each([false, true])('来源草稿即使答案和判定都为空仍可复核：旧坏区域=%s', async (badRegion) => {
+        state.answers = [answer({ recognizedAnswer: null, result: null, awardedScore: null, gradingSource: null,
+            reviewStatus: 'required', regionJson: JSON.stringify({ pageOrder: 1, candidateId: 'source',
+                regions: badRegion ? [{ x: 1, y: 0, width: 0, height: 0.5 }] : [],
+            }),
+        })];
+        mocks.extract.mockRejectedValueOnce(new Error('AI_TIMEOUT_ERROR'));
+        const response = await run({ pageOrders: [1] });
+        expect(await response.json()).toMatchObject({ status: 'review' });
+        expect(state.answers[0]).toMatchObject({ recognizedAnswer: null, result: null, reviewStatus: 'required' });
+    });
+
+    it('没有来源、答案和判定的空占位不算可复核识别结果', async () => {
+        state.answers = [answer({ recognizedAnswer: null, result: null, awardedScore: null, gradingSource: null, reviewStatus: 'required', regionJson: null })];
+        mocks.extract.mockRejectedValueOnce(new Error('AI_TIMEOUT_ERROR'));
+        expect(await (await run({ pageOrders: [1] })).json()).toMatchObject({ status: 'failed' });
     });
 
     it('耗时响应可恢复且编排函数对外可用', async () => {

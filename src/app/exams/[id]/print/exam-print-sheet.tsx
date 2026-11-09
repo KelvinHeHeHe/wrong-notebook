@@ -9,7 +9,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { resolveQuestionAnswerSpacePx } from "@/lib/exam/exam-answer-space";
 import type { AnswerSpaceMode } from "@/lib/exam/exam-answer-space";
 import { formatExamScore, summarizeExamScores } from "@/lib/exam/exam-score";
-import { groupExamQuestions } from "@/lib/exam/exam-sections";
+import { buildExamPrintLayout } from "@/lib/exam/exam-sections";
 import type { ExamSection, ExamSectionItem } from "@/lib/exam/exam-sections";
 import type { FigureAlign } from "@/lib/figure-scale";
 import type { ExamPaperDetail, ExamQuestionDetail } from "@/types/api";
@@ -120,12 +120,10 @@ export const ExamPrintSheet = forwardRef<HTMLDivElement, ExamPrintSheetProps>(fu
     onChangeCustomSpace,
 }, ref) {
     const { t, language } = useLanguage();
-    const questions = paper.questions.filter((question) => question.status === "ready" && question.questionText);
+    const { questions, sections, items } = buildExamPrintLayout(paper.questions, paper.groupByType, language);
     // 满分只统计已设分值的题目；全部未设时不显示满分行，打印与旧版一致
     const fullScore = summarizeExamScores(questions.map((question) => question.score ?? null)).total;
     const scoreUnit = language === "en" ? "pts" : "分";
-    // 按题型分大题：开启且全卷均为就绪题目时才分组（与非分组打印的过滤口径一致）
-    const sections = paper.groupByType ? groupExamQuestions(questions, language) : null;
 
     const renderQuestion = (question: ExamQuestionDetail, displayNumber: number) => (
         <ExamPrintQuestion
@@ -184,7 +182,7 @@ export const ExamPrintSheet = forwardRef<HTMLDivElement, ExamPrintSheetProps>(fu
                     </div>
                 ))
             ) : (
-                questions.map((question, index) => renderQuestion(question, index + 1))
+                items.map(({ question, displayNumber }) => renderQuestion(question, displayNumber))
             )}
             {includeAnswers && (
                 <section className="exam-answer-key">
@@ -197,7 +195,7 @@ export const ExamPrintSheet = forwardRef<HTMLDivElement, ExamPrintSheetProps>(fu
                             </div>
                         ))
                     ) : (
-                        renderAnswerKey(questions.map((question, index) => ({ question, displayNumber: index + 1 })))
+                        renderAnswerKey(items)
                     )}
                 </section>
             )}

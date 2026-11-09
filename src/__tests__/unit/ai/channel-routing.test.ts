@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     openaiOptions: [] as Array<{ apiKey?: string; baseURL?: string }>,
     create: vi.fn(),
     getAppConfig: vi.fn(),
+    log: vi.fn(),
 }));
 
 vi.mock('openai', async () => {
@@ -21,7 +22,7 @@ vi.mock('openai', async () => {
     };
 });
 vi.mock('@/lib/logger', () => ({
-    createLogger: vi.fn(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), box: vi.fn(), divider: vi.fn() })),
+    createLogger: vi.fn(() => ({ debug: mocks.log, info: mocks.log, warn: mocks.log, error: mocks.log, box: mocks.log, divider: mocks.log })),
 }));
 vi.mock('@/lib/config', () => ({ getAppConfig: mocks.getAppConfig, getActiveOpenAIConfig: vi.fn() }));
 vi.mock('@/lib/ai/usage', () => ({ recordAiCompletion: vi.fn() }));
@@ -101,6 +102,19 @@ describe('routeRole', () => {
 });
 
 describe('getAIService 渠道分工', () => {
+    it('真实 BaseProvider 判分失败转备用渠道时不记录上游回显和模型答案', async () => {
+        mocks.getAppConfig.mockReturnValue(baseConfig({ routing: { text: 'deepseek', fallback: 'glm' } }));
+        mocks.create.mockRejectedValueOnce(new Error('429 保密题干 保密学生作答'))
+            .mockResolvedValueOnce(reply('{"correct":true,"reason":"保密学生作答"}'));
+        const ai = await getAIService({ userId: 'u1', kind: 'grade' });
+        await expect(ai.gradeAnswer({ questionText: '保密题干', answerText: '标准答案', userAnswer: '保密学生作答' })).resolves.toMatchObject({ correct: true });
+        expect(mocks.create).toHaveBeenCalledTimes(2);
+        const logs = JSON.stringify(mocks.log.mock.calls, (_key, value: unknown) => value instanceof Error ? { message: value.message, stack: value.stack, cause: value.cause } : value);
+        expect(logs).not.toMatch(/保密题干|保密学生作答/);
+        const fallback = mocks.log.mock.calls.find((call) => call[1] === 'AI channel failed, trying fallback channel');
+        expect(fallback?.[0]).toMatchObject({ errorCode: 'AI_QUOTA_EXCEEDED' });
+        expect(fallback?.[0]).not.toHaveProperty('error');
+    });
     it('试卷答案提取始终使用视觉渠道并随请求发送图片', async () => {
         mocks.getAppConfig.mockReturnValue(baseConfig({ routing: { vision: 'glm', text: 'deepseek' } }));
         mocks.create.mockResolvedValue(reply('{"candidates":[]}'));

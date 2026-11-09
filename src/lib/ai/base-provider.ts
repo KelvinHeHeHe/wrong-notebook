@@ -109,15 +109,17 @@ export abstract class BaseAIProvider implements AIService {
         if (!observer) return;
         try {
             Promise.resolve(observer(event)).catch((error: unknown) => {
-                logger.error({ error, task: event.task }, 'AI completion observer failed');
+                const metadata = event.task === 'grading' || event.task === 'exam-answer-extraction' ? { errorCode: completionErrorCode(error) } : { error };
+                logger.error({ ...metadata, task: event.task }, 'AI completion observer failed');
             });
         } catch (error) {
-            logger.error({ error, task: event.task }, 'AI completion observer failed');
+            const metadata = event.task === 'grading' || event.task === 'exam-answer-extraction' ? { errorCode: completionErrorCode(error) } : { error };
+            logger.error({ ...metadata, task: event.task }, 'AI completion observer failed');
         }
     }
 
-    protected handleError(error: unknown): void {
-        logger.error({ error }, 'AI provider error');
+    protected handleError(error: unknown, privateContent = false): void {
+        logger.error(privateContent ? { errorCode: completionErrorCode(error) } : { error }, 'AI provider error');
         if (error instanceof Error) {
             if (error.message.startsWith('AI_RESPONSE_ERROR:')) {
                 throw error;
@@ -268,12 +270,18 @@ export abstract class BaseAIProvider implements AIService {
 
         try {
             const text = await this.run({ task: 'grading', system: prompt.system, user: prompt.user });
-            logger.debug({ rawResponse: text }, 'Grading AI raw response');
             return parseAnswerGrading(text);
         } catch (error) {
-            logger.error({ error, stack: error instanceof Error ? error.stack : undefined }, 'Error during answer grading');
-            this.handleError(error);
-            throw error;
+            let code = completionErrorCode(error);
+            try {
+                // 保留提供商的 SDK 状态归类，只允许其记录安全元数据。
+                this.handleError(error, true);
+            } catch (classified) {
+                code = completionErrorCode(classified);
+            }
+            // 题干和学生作答可能被上游回显，判分不保留原始异常或 cause。
+            logger.error({ provider: this.providerName, code }, '判分失败');
+            throw new Error(code);
         }
     }
 

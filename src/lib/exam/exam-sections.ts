@@ -27,6 +27,18 @@ export interface ExamSectionItem<T extends ExamSectionQuestion> {
     displayNumber: number;
 }
 
+/** 打印正文、答案页和回传识别共用的过滤、排序与连续题号。 */
+export function buildExamPrintLayout<T extends ExamSectionQuestion & { status: string; questionText?: string | null }>(
+    source: T[], groupByType: boolean, language: ExamSectionLanguage,
+) {
+    const questions = source.filter((question) => question.status === 'ready' && question.questionText)
+        .sort((a, b) => a.order - b.order);
+    const sections = groupByType ? groupExamQuestions(questions, language) : null;
+    const items = sections ? sections.flatMap((section) => section.items)
+        : questions.map((question, index) => ({ question, displayNumber: index + 1 }));
+    return { questions, sections, items };
+}
+
 export interface ExamSection<T extends ExamSectionQuestion> {
     /** 标准题型 key；null 表示来源题型无法识别（归入「其他」） */
     type: QuestionType | null;

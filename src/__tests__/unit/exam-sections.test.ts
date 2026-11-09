@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupExamQuestions } from '@/lib/exam/exam-sections';
+import { buildExamPrintLayout, groupExamQuestions } from '@/lib/exam/exam-sections';
 import type { ExamSectionQuestion } from '@/lib/exam/exam-sections';
 
 function q(
@@ -12,6 +12,16 @@ function q(
 }
 
 describe('groupExamQuestions 按题型分大题', () => {
+    it('共享打印布局先过滤未就绪和无题干题，再按打印方式连续编号', () => {
+        const questions = [
+            { ...q('a', 0, 'solution'), status: 'ready', questionText: '解答题' },
+            { ...q('b', 3, 'single_choice'), status: 'failed', questionText: '失败题' },
+            { ...q('c', 7, null, { errorItemQuestionType: 'single_choice' }), status: 'ready', questionText: '选择题' },
+            { ...q('d', 9, 'fill_blank'), status: 'ready', questionText: null },
+        ];
+        expect(buildExamPrintLayout(questions, true, 'zh').items.map(({ question, displayNumber }) => [question.id, displayNumber])).toEqual([['c', 1], ['a', 2]]);
+        expect(buildExamPrintLayout(questions, false, 'zh').items.map(({ question, displayNumber }) => [question.id, displayNumber])).toEqual([['a', 1], ['c', 2]]);
+    });
     it('按 QUESTION_TYPES 顺序分组，组内保持卷内 order，空组不返回', () => {
         const questions = [
             q('a', 0, 'solution'),
