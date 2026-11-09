@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { normalizeExamScore } from '@/lib/exam/exam-score';
 import { importedExamPageSchema, MAX_IMPORTED_EXAM_PAGES } from '@/lib/schemas/exam';
 
 export const createExamAttemptSchema = z.object({
@@ -29,3 +30,24 @@ export const upsertExamAttemptPagesSchema = z.object({
 
 export type CreateExamAttemptInput = z.infer<typeof createExamAttemptSchema>;
 export type UpsertExamAttemptPagesInput = z.infer<typeof upsertExamAttemptPagesSchema>;
+
+const awardedScoreSchema = z.number().min(0).max(1000)
+    .refine((score) => Math.abs(score * 10 - Math.round(score * 10)) <= 1e-6, 'EXAM_ATTEMPT_SCORE_INVALID');
+
+export const updateExamAttemptAnswerSchema = z.object({
+    recognizedAnswer: z.string().max(20000).nullable().optional(),
+    result: z.enum(['correct', 'wrong', 'not_attempted']).nullable().optional(),
+    awardedScore: awardedScoreSchema.nullable().optional(),
+    maxScore: z.number().refine((score) => normalizeExamScore(score) !== null, 'EXAM_ATTEMPT_SCORE_INVALID').nullable().optional(),
+    gradingReason: z.string().max(10000).nullable().optional(),
+    candidateRef: z.object({
+        pageOrder: z.number().int().min(1).max(MAX_IMPORTED_EXAM_PAGES),
+        candidateId: z.string().trim().min(1).max(200),
+    }).strict().optional(),
+    regrade: z.boolean().optional(),
+    expectedUpdatedAt: z.string().datetime({ offset: true }),
+}).strict();
+
+export const confirmExamAttemptSchema = z.object({
+    expectedUpdatedAt: z.string().datetime({ offset: true }),
+}).strict();
