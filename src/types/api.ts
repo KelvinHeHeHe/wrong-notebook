@@ -521,3 +521,30 @@ export interface ExamPaperDetail {
     sourceFileName?: string | null;
     pages?: ExamPaperPageDetail[];
 }
+
+export type ExamAttemptStatus = 'uploaded' | 'recognizing' | 'review' | 'confirmed' | 'failed';
+
+export interface ExamAttemptVersion {
+    id: string;
+    status: ExamAttemptStatus;
+    updatedAt: string;
+}
+
+/** 作答列表只使用摘要，不包含 Base64 页图。 */
+export interface ExamAttemptSummary extends ExamAttemptVersion {
+    paperId: string;
+    takenAt: string;
+    comment: string | null;
+    totalScore: number | null;
+    maxScore: number | null;
+    confirmedAt: string | null;
+    createdAt: string;
+    pageCount: number;
+}
+
+export interface ExamAttemptRecognitionResponse {
+    status: ExamAttemptStatus;
+    updatedAt: string;
+    successes: Array<{ pageOrder: number; candidateCount: number; matchedCount: number }>;
+    failures: Array<{ pageOrder: number; error: string }>;
+}

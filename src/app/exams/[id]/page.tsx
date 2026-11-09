@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useTimeZone } from "@/contexts/TimeZoneContext";
 import { answeredDateToISOString, formatDateTime } from "@/lib/date-time";
 import { ClipboardCheck, Loader2, Printer, RotateCcw, Save, Trash2 } from "lucide-react";
+import { ExamAttemptHistory } from "@/components/exam-attempt/exam-attempt-history";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +16,7 @@ import { ExamFigureScaleBar } from "@/components/exam/exam-figure-scale-bar";
 import { ExamStatusBadge } from "@/components/exam/exam-status-badge";
 import { ExamDetailQuestions } from "./exam-detail-questions";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { en } from "@/lib/i18n/en";
 import { usePageTitle } from "@/lib/page-title";
 import { apiClient, ApiError } from "@/lib/api-client";
 import { useRunningTask } from "@/lib/hooks/use-running-task";
@@ -211,6 +213,9 @@ export default function ExamDetailPage() {
                             {t.exam.print}
                         </Button>
                     </Link>
+                    {paper.status === "ready" && <Link href={`/exams/${paper.id}/attempts/new`}>
+                        <Button size="sm" variant="outline"><ClipboardCheck className="mr-2 h-4 w-4" />{(t.examAttempt ?? en.examAttempt).title}</Button>
+                    </Link>}
                     {!draft && recordable.length > 0 && (
                         <Button size="sm" onClick={startRecording}>
                             <ClipboardCheck className="mr-2 h-4 w-4" />
@@ -270,6 +275,8 @@ export default function ExamDetailPage() {
                     onSaveUniformScore={saveUniformScore}
                     onSaveGroupByType={saveGroupByType}
                 />
+
+                <ExamAttemptHistory key={paper.id} paperId={paper.id} />
 
                 {draft && (
                     <div className="fixed inset-x-0 bottom-16 z-30 border-t bg-background/95 p-3 backdrop-blur md:bottom-0">

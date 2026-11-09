@@ -209,3 +209,16 @@ describe('regionFromPoints', () => {
         expect(regionFromPoints(-0.5, 0.5, 1.5, 0.6)).toMatchObject({ x: 0, width: 1 });
     });
 });
+
+
+describe('纸质作答历史排序', () => {
+    it('按 takenAt 倒序且不修改源摘要数组', async () => {
+        const { sortExamAttemptHistory } = await import('@/lib/exam/exam-attempt-client');
+        const attempts = [
+            { id: 'older', takenAt: '2026-11-01T00:00:00Z' },
+            { id: 'newer', takenAt: '2026-11-08T00:00:00Z' },
+        ] as import('@/types/api').ExamAttemptSummary[];
+        expect(sortExamAttemptHistory(attempts).map((attempt) => attempt.id)).toEqual(['newer', 'older']);
+        expect(attempts.map((attempt) => attempt.id)).toEqual(['older', 'newer']);
+    });
+});

@@ -36,10 +36,10 @@ beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    vi.mocked(apiClient.get).mockResolvedValue({
+    vi.mocked(apiClient.get).mockImplementation(async (url) => url.endsWith('/attempts') ? [] : ({
         id: 'paper-1', title: '数学练习', createdAt: recordedAt, status: 'ready', requestedCount: 1,
         questions: [{ id: 'q1', status: 'ready', errorItemId: 'e1', attempts: [{ id: 'r1', result: 'correct', createdAt: recordedAt }] }],
-    });
+    }));
     vi.mocked(apiClient.post).mockResolvedValue({});
 });
 afterEach(async () => {
@@ -102,5 +102,33 @@ describe('试卷页面使用应用时区', () => {
         await click('切换时区');
         expect(container.textContent).toContain('2026-10-19 03:27');
         expect(container.textContent).not.toContain('2026-10-19 11:27');
+    });
+});
+
+
+describe('纸质作答入口与历史', () => {
+    it('ready 显示回传入口，历史只请求摘要并按日期倒序显示状态分数和复核链接', async () => {
+        vi.mocked(apiClient.get).mockImplementation(async (url) => url.endsWith('/attempts') ? [
+            { id: 'old', takenAt: '2026-10-17T03:00:00Z', status: 'confirmed', totalScore: 8, maxScore: 10 },
+            { id: 'new', takenAt: '2026-10-19T03:00:00Z', status: 'review', totalScore: null, maxScore: null },
+        ] : {
+            id: 'paper-1', title: '数学练习', createdAt: recordedAt, status: 'ready', requestedCount: 0, questions: [],
+        });
+        await renderPage('Asia/Shanghai');
+        expect(container.querySelector('a[href="/exams/paper-1/attempts/new"]')?.textContent).toContain('回传纸质作答');
+        const history = container.querySelector('[aria-label="纸质作答历史"]')!;
+        expect(history.textContent).toContain('8 / 10');
+        expect(history.textContent).toContain('待复核');
+        expect(history.querySelector('li a')?.getAttribute('href')).toBe('/exam-attempts/new');
+        expect(apiClient.get).toHaveBeenCalledWith('/api/exams/paper-1/attempts');
+        expect(vi.mocked(apiClient.get).mock.calls.some(([url]) => url.includes('includePages'))).toBe(false);
+        expect(history.querySelector('img')).toBeNull();
+    });
+    it.each(['partial', 'failed', 'generating'])('%s 不显示回传入口', async (status) => {
+        vi.mocked(apiClient.get).mockImplementation(async (url) => url.endsWith('/attempts') ? [] : {
+            id: 'paper-1', title: '数学练习', createdAt: recordedAt, status, requestedCount: 0, questions: [],
+        });
+        await renderPage('Asia/Shanghai');
+        expect(container.querySelector('a[href="/exams/paper-1/attempts/new"]')).toBeNull();
     });
 });
