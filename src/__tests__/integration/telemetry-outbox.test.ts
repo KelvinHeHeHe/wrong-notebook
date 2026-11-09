@@ -34,10 +34,11 @@ import { getTelemetryState } from '@/lib/telemetry/state';
 let database: PrismaClient;
 let directory: string;
 /**
- * 测试基准时间取真实当前时间：instance_alive 与错误记录的 createdAt 由服务端写入真实时间，
- * 收集服务契约只接受基准时间前 7 天至后 1 天内的日期，写死某一天会让用例随日期推移失效。
+ * 基准取真实当前 UTC 日的中午：保留收集契约前 7 天/后 1 天窗口，避免写死日期失效。
+ * +1h/+7h 必须仍在同一 UTC 日；服务端真实 createdAt 也始终在当前日的有效窗口内。
  */
 const NOW = new Date();
+NOW.setUTCHours(12, 0, 0, 0);
 const TODAY = NOW.toISOString().slice(0, 10);
 const HOUR = 3_600_000;
 
