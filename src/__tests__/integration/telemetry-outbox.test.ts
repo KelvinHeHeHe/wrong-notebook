@@ -128,8 +128,13 @@ describe('批次内容', () => {
         expect(await database.telemetryEvent.count()).toBe(0);
     });
 
-    it('同一批只含一个版本（升级前的旧记录先发），每批最多 100 条', async () => {
-        await database.telemetryEvent.create({ data: { name: 'app_opened', payload: '{"client":"pwa"}', version: '2000.1.1', local: false, createdAt: new Date(NOW.getTime() - 2 * HOUR) } });
+    it.each([1, 23])('同一批只含一个版本（升级前的旧记录先发），每批最多 100 条；UTC %i 点心跳', async (utcHour) => {
+        // 显式模拟真实数据库在早/晚 UTC 写入的当日心跳，排序不依赖测试实际运行时刻。
+        const heartbeatAt = new Date(NOW);
+        heartbeatAt.setUTCHours(utcHour, 0, 0, 0);
+        await database.telemetryEvent.create({ data: { name: 'instance_alive', payload: JSON.stringify({ platform: 'fnos', aiConfigured: true }), version: getAppVersion(), local: false, createdAt: heartbeatAt } });
+        // 旧版本记录放在前一 UTC 日，必须早于任意当日心跳和当前版本事件。
+        await database.telemetryEvent.create({ data: { name: 'app_opened', payload: '{"client":"pwa"}', version: '2000.1.1', local: false, createdAt: new Date(NOW.getTime() - 24 * HOUR) } });
         await addEvents(120);
         const fetchMock = okFetch();
         await flushOutbox({ now: NOW, fetchImpl: fetchMock });
