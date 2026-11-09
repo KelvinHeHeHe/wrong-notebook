@@ -62,7 +62,7 @@ export async function startMockAI() {
                     const patch = JSON.parse(Buffer.concat(chunks).toString() || '{}');
                     const state = cases.get(id) || { id, calls: [], inflight: 0, held: [], partial: false, gradeError: false, hold: false, masteryProbability: 30, failNext: 0, splitFailNext: 0, distinctAnalysis: false };
                     // 控制接口只更新声明的标量字段，保持内部集合及对象原型不受请求体影响。
-                    const allowed = new Set(['partial', 'gradeError', 'hold', 'masteryProbability', 'title', 'retry', 'failNext', 'splitFailNext', 'distinctAnalysis']);
+                    const allowed = new Set(['partial', 'gradeError', 'hold', 'masteryProbability', 'title', 'retry', 'failNext', 'splitFailNext', 'distinctAnalysis', 'extractionFailOnCall']);
                     if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).some((key) => !allowed.has(key))) {
                         return json(response, 400, { error: '不支持的场景控制字段' });
                     }
@@ -71,6 +71,7 @@ export async function startMockAI() {
                         (patch.title !== undefined && (typeof patch.title !== 'string' || patch.title.length > 500)) ||
                         (patch.retry !== undefined && (!Number.isInteger(patch.retry) || patch.retry < 0)) ||
                         (patch.failNext !== undefined && (!Number.isInteger(patch.failNext) || patch.failNext < 0 || patch.failNext > 100)) ||
+                        (patch.extractionFailOnCall !== undefined && (!Number.isInteger(patch.extractionFailOnCall) || patch.extractionFailOnCall < 0 || patch.extractionFailOnCall > 100)) ||
                         (patch.splitFailNext !== undefined && (!Number.isInteger(patch.splitFailNext) || patch.splitFailNext < 0 || patch.splitFailNext > 100))) {
                         return json(response, 400, { error: '场景控制字段类型无效' });
                     }
@@ -83,6 +84,7 @@ export async function startMockAI() {
                     if (patch.failNext !== undefined) state.failNext = patch.failNext;
                     if (patch.splitFailNext !== undefined) state.splitFailNext = patch.splitFailNext;
                     if (patch.distinctAnalysis !== undefined) state.distinctAnalysis = patch.distinctAnalysis;
+                    if (patch.extractionFailOnCall !== undefined) state.extractionFailOnCall = patch.extractionFailOnCall;
                     if (!state.hold) state.held.splice(0).forEach((release) => release());
                     cases.set(id, state);
                 }
@@ -107,7 +109,7 @@ export async function startMockAI() {
             const text = textOf(messages);
             const system = typeof messages[0]?.content === 'string' ? messages[0].content : '';
             const image = messages.some((message) => Array.isArray(message.content) && message.content.some((part) => part.type === 'image_url'));
-            const operation = system.includes('【分题输出协议】') ? 'split' : system.includes('【文字修正输出协议】') ? 'fix-text' : image ? 'analysis' : /"probability"/.test(system) ? 'mastery' : /"correct"/.test(system) ? 'grade' :
+            const operation = system.includes('【试卷页面答案提取】') ? 'exam-answer-extraction' : system.includes('【分题输出协议】') ? 'split' : system.includes('【文字修正输出协议】') ? 'fix-text' : image ? 'analysis' : /"probability"/.test(system) ? 'mastery' : /"correct"/.test(system) ? 'grade' :
                 system.includes('【可选知识点】') ? 'tag-suggest' :
                 system.includes('<mistake_status>内容') && !system.includes('<question_text>内容') ? 'reanswer' :
                 /"gradeSemester"/.test(system) && !/question_text|"questionText"/.test(system) ? 'grade-recognition' : /question_text|"questionText"/.test(system) ? 'variant' : 'unknown';
@@ -129,6 +131,26 @@ export async function startMockAI() {
                     call.failed = true;
                     // 使用不会被 SDK 自动重试的状态码，确保失败真正交给应用处理
                     return json(response, 400, { error: { message: 'E2E 固定上游失败', type: 'invalid_request_error', code: 'e2e_failure' } });
+                }
+                if (operation === 'exam-answer-extraction') {
+                    const sequence = state.calls.filter((entry) => entry.operation === operation).length;
+                    if (sequence === state.extractionFailOnCall) {
+                        call.failed = true;
+                        return json(response, 400, { error: { message: 'E2E 固定作答页提取失败', type: 'invalid_request_error' } });
+                    }
+                    const user = JSON.parse(textOf(messages.filter((message) => message.role === 'user')) || '{}');
+                    const questions = user.data?.questions || [];
+                    const candidate = (index, answer, confidence = 0.95, notAttempted = false) => ({
+                        sourceShortId: questions[index]?.sourceShortId ?? null, displayNumber: questions[index]?.displayNumber ?? null,
+                        recognizedAnswer: answer, notAttempted, confidence, regions: [{ x: 0.1, y: 0.2, width: 0.7, height: 0.15 }],
+                    });
+                    // 按提取调用序号分配两页；失败页重试返回同一固定页材料。
+                    const candidates = sequence === 1
+                        ? [candidate(0, '低置信度答案', 0.6), candidate(1, '主观题证明过程')]
+                        : [candidate(2, '正确答案'), { ...candidate(3, '待人工映射答案'), sourceShortId: null, displayNumber: null }, candidate(4, null, 0.95, true)];
+                    return json(response, 200, { id: `e2e-${state.id}-${state.calls.length}`, object: 'chat.completion', created: 0, model: 'e2e-mock-model',
+                        choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ candidates }) }, finish_reason: 'stop' }],
+                        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
                 }
                 if (operation === 'split') {
                     const user = JSON.parse(messages.find((message) => message.role === 'user') ? textOf(messages.filter((message) => message.role === 'user')) : '{}');

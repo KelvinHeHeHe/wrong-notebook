@@ -36,7 +36,7 @@ export function ExamAttemptReview({ attemptId }: ExamAttemptReviewProps) {
     const invalidStatus = attempt.status !== 'review' || paper.status !== 'ready';
     const canConfirm = !disabled && !invalidStatus && questions.length > 0 && issues.length === 0;
     const phaseLabel = phase === 'save' || phase === 'saveAll' ? text.saving : phase === 'regrade' ? text.regrading : phase === 'retry' ? text.retrying : phase === 'map' ? text.mapping : phase === 'confirm' ? text.confirming : null;
-    return <main className="mx-auto min-h-screen max-w-4xl space-y-6 px-4 py-6 pb-52 md:px-8">
+    return <main className="mx-auto min-h-screen max-w-4xl space-y-6 px-4 py-6 pb-72 md:px-8 md:pb-52">
         <Link href={`/exams/${attempt.paperId}`} className="inline-block text-sm underline underline-offset-4">{text.back}</Link>
         <PageHeader title={text.title} description={paper.title} />
         <section aria-label={text.title} className="space-y-2 rounded-xl border bg-muted/30 p-4">
@@ -60,7 +60,7 @@ export function ExamAttemptReview({ attemptId }: ExamAttemptReviewProps) {
             {invalidStatus && <p>{text.invalidStatus}</p>}{!questions.length && <p>{text.noQuestions}</p>}
             <ul className="space-y-1">{issues.map((issue) => <li key={`${issue.questionId}:${issue.reason}`}>{text.question.replace('{number}', String(issue.number))}：{text[issue.reason]}</li>)}</ul>
         </section>}
-        <footer className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur">
+        <footer className="fixed inset-x-0 bottom-[calc(4rem+1px+env(safe-area-inset-bottom))] z-50 border-t bg-background/95 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur md:bottom-0">
             <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-end gap-3">
                 {confirmed ? <p role="status">{text.confirmed}</p> : <>
                     <Button type="button" variant="outline" disabled={disabled || !dirty || Object.values(drafts).some((draft) => !validDraft(draft))} onClick={() => void review.saveAll()}>{text.saveAll}</Button>

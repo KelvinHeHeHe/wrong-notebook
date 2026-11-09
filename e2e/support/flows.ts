@@ -60,6 +60,8 @@ export async function directEntry(page: Page, scenario: Scenario, question: stri
 export async function openSettings(page: Page, tab = '通用') {
     await page.getByRole('button', { name: '设置', exact: true }).click();
     const dialog = page.getByRole('dialog');
-    if (await dialog.getByRole('tab', { name: tab, exact: true }).count()) await dialog.getByRole('tab', { name: tab, exact: true }).click();
+    // 移动端标签只显示图标；按保留在 DOM 的文字选择同一真实标签按钮。
+    const target = dialog.getByRole('tab').filter({ hasText: tab });
+    if (await target.count()) await target.click();
     return dialog;
 }

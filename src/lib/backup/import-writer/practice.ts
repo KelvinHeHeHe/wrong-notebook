@@ -38,7 +38,8 @@ export async function importPracticeRecords(ctx: ImportContext): Promise<void> {
                 subject: raw.subject,
                 difficulty: raw.difficulty,
                 isCorrect: raw.isCorrect,
-                ...(errorItemId ? {
+                // 正确外部题不创建错题，但经归属与试卷校验的作答记录仍须完整恢复。
+                ...(errorItemId || (record.source === 'exam' && examAttemptId && examQuestionId) ? {
                     errorItemId,
                     result: record.result,
                     questionText: raw.questionText,

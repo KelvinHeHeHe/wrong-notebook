@@ -400,6 +400,38 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(await database.practiceRecord.count({ where: { examAttemptId: restored.attempts[0].id } })).toBe(1);
     });
 
+    it.each([13, 12])('v%i 正确外部题无错题关联时完整恢复 exam 记录，拒绝无效关联且保留普通记录兼容性', async (version) => {
+        await database.examPaper.create({ data: {
+            id: 'external-paper', userId: 'user-1', title: '正确外部题备份', status: 'ready', scope: 'all', difficulty: 'medium', requestedCount: 1, subjectIds: '[]', origin: 'imported',
+            questions: { create: { id: 'external-question', order: 1, sourceShortId: 'EXT001', status: 'ready', questionText: '合成外部题', answerText: '7', score: 10 } },
+            attempts: { create: { id: 'external-attempt', userId: 'user-1', status: 'confirmed', takenAt: new Date('2026-11-08T00:00:00Z'), totalScore: 10, maxScore: 10 } },
+        } });
+        await database.practiceRecord.create({ data: {
+            userId: 'user-1', subject: '数学', source: 'exam', result: 'correct', isCorrect: true, errorItemId: null,
+            examQuestionId: 'external-question', examAttemptId: 'external-attempt', questionText: '合成外部题', answerText: '7', analysis: '合成推导', wrongAnswerText: '7', originalImageUrl: 'data:image/png;base64,c3ludGhldGlj', figureSvg: figure,
+        } });
+        const backup = await exportBackup();
+        backup.version = version;
+        const record = backup.practiceRecords.find((item: { examAttemptId?: string }) => item.examAttemptId === 'external-attempt');
+        backup.practiceRecords.push({ ...record, id: 'invalid-external-record', subject: '无效引用', examQuestionId: 'unknown-question' });
+        backup.practiceRecords.push({ ...record, id: 'plain-record', subject: '普通记录', source: 'practice', examAttemptId: null, examQuestionId: null });
+        await clearUserData();
+        await importBackup(backup);
+        const restored = await database.examAttempt.findFirstOrThrow({ where: { userId: 'user-1' }, include: { paper: { include: { questions: true } } } });
+        const question = restored.paper.questions[0];
+        const practices = await database.practiceRecord.findMany({ where: { userId: 'user-1', subject: '数学' } });
+        const external = practices.find((item) => item.examAttemptId === restored.id);
+        expect(external).toMatchObject({ errorItemId: null, source: 'exam', result: 'correct', isCorrect: true, examAttemptId: restored.id, examQuestionId: question.id,
+            questionText: '合成外部题', answerText: '7', analysis: '合成推导', wrongAnswerText: '7', originalImageUrl: 'data:image/png;base64,c3ludGhldGlj', figureSvg: figure });
+        expect(restored.id).not.toBe('external-attempt');
+        expect(question.id).not.toBe('external-question');
+        for (const subject of ['无效引用', '普通记录']) {
+            expect(await database.practiceRecord.findFirstOrThrow({ where: { subject } })).toMatchObject({ source: 'practice', result: null, examAttemptId: null, examQuestionId: null, questionText: null, isCorrect: true });
+        }
+        await importBackup(backup);
+        expect(await database.practiceRecord.count({ where: { examAttemptId: restored.id, examQuestionId: question.id } })).toBe(1);
+    });
+
     it('v12 导入跳过跨试卷的逐题评分，同时保留同一次作答中的合法评分', async () => {
         await database.examPaper.create({
             data: {

@@ -68,3 +68,23 @@ describe('本地模型服务的分题协议', () => {
         expect(mock.violations).toEqual([]);
     });
 });
+
+
+describe('纸质作答提取的固定协议', () => {
+    it('按页稳定返回低置信度、主观题及未匹配候选，第二页首次失败后可重试', async () => {
+        await fetch(`${mock.origin}/control/answers`, { method: 'POST', body: JSON.stringify({ extractionFailOnCall: 2 }) });
+        const answers = new OpenAIProvider({ apiKey: DUMMY_KEY, baseUrl: `${mock.origin}/cases/answers/v1`, model: 'e2e-mock-model' });
+        const input = { imageBase64: 'dGVzdA==', mimeType: 'image/png', language: 'zh' as const,
+            questions: Array.from({ length: 5 }, (_, index) => ({ id: `q${index + 1}`, displayNumber: index + 1, sourceShortId: `SRC00${index + 1}`, questionText: `合成题 ${index + 1}` })) };
+        const first = await answers.extractExamPageAnswers(input);
+        expect(first.candidates).toHaveLength(2);
+        expect(first.candidates[0]).toMatchObject({ sourceShortId: 'SRC001', confidence: 0.6, recognizedAnswer: '低置信度答案' });
+        await expect(answers.extractExamPageAnswers(input)).rejects.toThrow();
+        const retry = await answers.extractExamPageAnswers(input);
+        expect(retry.candidates).toHaveLength(3);
+        expect(retry.candidates[1]).toMatchObject({ sourceShortId: null, displayNumber: null, recognizedAnswer: '待人工映射答案' });
+        expect(retry.candidates[2]).toMatchObject({ notAttempted: true });
+        expect(mock.cases.get('answers')?.calls.filter((call) => call.operation === 'exam-answer-extraction')).toHaveLength(3);
+        expect(mock.violations).toEqual([]);
+    });
+});
