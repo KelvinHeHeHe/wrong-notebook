@@ -6,7 +6,8 @@ import { getAIService } from '@/lib/ai';
 import { parseErrorCode } from '@/lib/ai/error-classification';
 import type { AIService } from '@/lib/ai/types';
 import { consumeAiQuota } from '@/lib/ai-quota';
-import { conflict, notFound, validationError } from '@/lib/api-errors';
+import { conflict, createErrorResponse, ErrorCode, notFound, validationError } from '@/lib/api-errors';
+import type { ApiErrorResponse } from '@/lib/api-errors';
 import {
     buildAttemptPageRecognition, matchExamAnswerCandidates, parseAttemptPageRecognition,
     parseAttemptRegionJson, requiresExamAnswerReview, serializeAttemptPageRecognition, suggestExamAnswerScore,
@@ -15,6 +16,7 @@ import type { ExamAttemptAnswerCandidate, ExamAttemptPageRecognition } from '@/l
 import { buildExamPrintLayout } from '@/lib/exam/exam-sections';
 import { createLogger } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
+import { normalizeQuestionType } from '@/lib/question/question-type';
 import { MAX_IMPORTED_EXAM_PAGES } from '@/lib/schemas/exam';
 
 const logger = createLogger('exam-attempt-recognition');
@@ -73,6 +75,18 @@ function answerPageOrder(raw: string | null | undefined): number | null {
     } catch {
         return null;
     }
+}
+
+/** 失败时合并同一图片的旧材料与本轮候选；稳定 ID 去重，来源引用保持有效。 */
+function buildFailureRecognition(page: Page, recognition: ExamAttemptPageRecognition, errorCode: string): ExamAttemptPageRecognition {
+    const previous = page.recognitionResult ? parseAttemptPageRecognition(page.recognitionResult) : null;
+    const candidates = new Map<string, ExamAttemptAnswerCandidate>();
+    for (const candidate of [...(previous?.candidates ?? []), ...recognition.candidates]) {
+        candidates.set(candidate.candidateId, {
+            ...candidate, regions: candidate.regions.filter((region) => region.width > 0 && region.height > 0),
+        });
+    }
+    return { ...recognition, status: 'failed', errorCode, candidates: [...candidates.values()] };
 }
 
 function checkCurrent(current: CurrentAttempt | null, userId: string, version: Date, page?: Page): asserts current is CurrentAttempt {
@@ -168,9 +182,13 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
         checkCurrent(current, user.id, version, page);
         return current;
     };
-    const printLayout = buildExamPrintLayout(attempt.paper.questions.map((question) => ({
-        ...question, errorItemQuestionType: question.errorItem?.questionType ?? null,
-    })), attempt.paper.groupByType, language);
+    const printLayout = buildExamPrintLayout(attempt.paper.questions.map((question) => {
+        const linkedType = normalizeQuestionType(question.errorItem?.questionType);
+        return {
+            ...question, questionType: normalizeQuestionType(question.questionType),
+            errorItem: question.errorItem ? { questionType: linkedType } : null, errorItemQuestionType: linkedType,
+        };
+    }), attempt.paper.groupByType, language);
     const context = printLayout.items.slice(0, 100).map(({ question, displayNumber }) => ({
         id: question.id, displayNumber, sourceShortId: question.sourceShortId,
         questionText: (question.questionText ?? '').slice(0, 160),
@@ -222,12 +240,7 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
                 continue;
             }
             const errorCode = parseErrorCode(error);
-            envelope = buildAttemptPageRecognition(page.order, null, new Date().toISOString(), errorCode);
-            // 同一图片失败重试不能抹掉先前尚待人工映射的候选。
-            const previous = page.recognitionResult ? parseAttemptPageRecognition(page.recognitionResult) : null;
-            if (previous) envelope.candidates = previous.candidates.map((candidate) => ({
-                ...candidate, regions: candidate.regions.filter((region) => region.width > 0 && region.height > 0),
-            }));
+            envelope = buildFailureRecognition(page, buildAttemptPageRecognition(page.order, null, new Date().toISOString(), errorCode), errorCode);
             logger.warn({ attemptId, pageOrder: page.order, errorCode }, '作答页面识别失败');
         }
 
@@ -276,7 +289,7 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
             failures.push({ pageOrder: page.order, error: errorCode });
             // 单页事务已回滚；尽力保存失败材料，后续页面仍继续处理。
             try {
-                version = await persistPage({ ...envelope, status: 'failed', errorCode });
+                version = await persistPage(buildFailureRecognition(page, envelope, errorCode));
             } catch (retryError) {
                 if (retryError instanceof StaleRecognitionError) staleCode = retryError.message;
                 else logger.warn({ attemptId, pageOrder: page.order, errorCode }, '保存页面失败信封失败');
@@ -284,54 +297,66 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
         }
     }
 
+    let finalizeFailed = false;
     if (!staleCode) {
         let finalStatus: 'review' | 'failed' | null = null;
-        try {
-            await prisma.$transaction(async (tx) => {
-                const current = await tx.examAttempt.findUnique({
-                    where: { id: attemptId, userId: user.id },
-                    select: {
-                        ...currentSelect,
-                        pages: { select: { id: true, checksum: true, recognitionResult: true } },
-                        answers: { select: { ...currentSelect.answers.select, recognizedAnswer: true, result: true } },
-                    },
-                });
-                checkCurrent(current, user.id, version);
-                const hasResults = current.pages.some((page) => {
-                    const recognition = page.recognitionResult ? parseAttemptPageRecognition(page.recognitionResult) : null;
-                    return recognition !== null && (recognition.status === 'succeeded' || recognition.candidates.length > 0);
-                }) || current.answers.some((answer) => answer.reviewStatus === 'reviewed' || answer.recognizedAnswer !== null
-                    || answer.result !== null || answerPageOrder(answer.regionJson) !== null);
-                finalStatus = hasResults ? 'review' : 'failed';
-                const updatedAt = nextVersion(version);
-                const saved = await tx.examAttempt.updateMany({
-                    where: { id: attemptId, userId: user.id, status: 'recognizing', updatedAt: version },
-                    data: { status: finalStatus, updatedAt },
-                });
-                if (!saved.count) throw new StaleRecognitionError('EXAM_ATTEMPT_CHANGED');
-                for (const question of printLayout.questions) {
-                    if (!current.answers.some((answer) => answer.examQuestionId === question.id)) {
-                        await tx.examAttemptAnswer.create({ data: {
-                            attemptId, examQuestionId: question.id, recognizedAnswer: null, result: null,
-                            awardedScore: null, maxScore: question.score, gradingSource: null, gradingReason: null,
-                            confidence: null, reviewStatus: 'required', regionJson: null,
-                        } });
-                    }
-                }
+        const finalize = () => prisma.$transaction(async (tx) => {
+            const current = await tx.examAttempt.findUnique({
+                where: { id: attemptId, userId: user.id },
+                select: {
+                    ...currentSelect,
+                    pages: { select: { id: true, checksum: true, recognitionResult: true } },
+                    answers: { select: { ...currentSelect.answers.select, recognizedAnswer: true, result: true } },
+                },
             });
-        } catch (error) {
-            if (!(error instanceof StaleRecognitionError)) {
+            checkCurrent(current, user.id, version);
+            const hasResults = current.pages.some((page) => {
+                const recognition = page.recognitionResult ? parseAttemptPageRecognition(page.recognitionResult) : null;
+                return recognition !== null && (recognition.status === 'succeeded' || recognition.candidates.length > 0);
+            }) || current.answers.some((answer) => answer.reviewStatus === 'reviewed' || answer.recognizedAnswer !== null
+                || answer.result !== null || answerPageOrder(answer.regionJson) !== null);
+            finalStatus = hasResults ? 'review' : 'failed';
+            const updatedAt = nextVersion(version);
+            const saved = await tx.examAttempt.updateMany({
+                where: { id: attemptId, userId: user.id, status: 'recognizing', updatedAt: version },
+                data: { status: finalStatus, updatedAt },
+            });
+            if (!saved.count) throw new StaleRecognitionError('EXAM_ATTEMPT_CHANGED');
+            for (const question of printLayout.questions) {
+                if (!current.answers.some((answer) => answer.examQuestionId === question.id)) {
+                    await tx.examAttemptAnswer.create({ data: {
+                        attemptId, examQuestionId: question.id, recognizedAnswer: null, result: null,
+                        awardedScore: null, maxScore: question.score, gradingSource: null, gradingReason: null,
+                        confidence: null, reviewStatus: 'required', regionJson: null,
+                    } });
+                }
+            }
+        });
+        for (let retry = 0; retry < 2; retry += 1) {
+            try {
+                await finalize();
+                break;
+            } catch (error) {
+                // 新请求已接管或人工已改动时，不再重试旧调用。
+                if (error instanceof StaleRecognitionError) break;
+                logger.warn({ attemptId, errorCode: 'EXAM_ATTEMPT_FINALIZE_FAILED', attempt: retry + 1 }, '补齐作答占位失败');
+                if (retry === 0) continue;
                 if (finalStatus === null) throw error;
-                logger.warn({ attemptId, errorCode: 'EXAM_ATTEMPT_FINALIZE_FAILED' }, '补齐作答占位失败');
-                // 占位写入失败不应占住识别状态；仍以同一版本锁保护最终状态。
+                // 持续失败仍须释放状态，但向调用方明确返回批次收尾错误。
                 await prisma.examAttempt.updateMany({
                     where: { id: attemptId, userId: user.id, status: 'recognizing', updatedAt: version },
                     data: { status: finalStatus, updatedAt: nextVersion(version) },
                 });
+                finalizeFailed = true;
             }
-            // 新请求已接管或人工已改动时，不再更新旧调用的状态和占位。
         }
     }
     const latest = await prisma.examAttempt.findUnique({ where: { id: attemptId, userId: user.id }, select: { status: true, updatedAt: true } });
-    return { successes, failures, status: latest?.status ?? 'failed', updatedAt: latest?.updatedAt.toISOString() ?? version.toISOString() };
+    const result = { successes, failures, status: latest?.status ?? 'failed', updatedAt: latest?.updatedAt.toISOString() ?? version.toISOString() };
+    if (finalizeFailed) {
+        const response = createErrorResponse('EXAM_ATTEMPT_FINALIZE_FAILED', 503, ErrorCode.DATABASE_ERROR, { phase: 'finalize', retryable: true });
+        const body = await response.json() as ApiErrorResponse;
+        throw new ExamAttemptRecognitionError(Response.json({ ...body, ...result }, { status: response.status, headers: response.headers }));
+    }
+    return result;
 }
