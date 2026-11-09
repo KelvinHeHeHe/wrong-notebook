@@ -57,7 +57,10 @@ export const PATCH = withRecoverableResponse(withUser(async (
             if (attempt.updatedAt.getTime() !== expected.getTime()) throw new ReviewError(conflict('EXAM_ATTEMPT_CHANGED'));
 
             const data: Prisma.ExamAttemptAnswerUpdateInput = { ...changes, gradingSource: 'manual', reviewStatus: 'reviewed' };
-            if (candidateRef) {
+            if (candidateRef === null) {
+                if (!parseAttemptRegionJson(answer.regionJson)?.candidateId) throw new ReviewError(validationError('EXAM_ATTEMPT_CANDIDATE_NOT_MAPPED'));
+                Object.assign(data, { recognizedAnswer: null, confidence: null, regionJson: null });
+            } else if (candidateRef !== undefined) {
                 const page = attempt.pages.find((item) => item.order === candidateRef.pageOrder);
                 const envelope = page?.recognitionResult ? parseAttemptPageRecognition(page.recognitionResult) : null;
                 const candidates = envelope?.candidates.filter((item) => item.candidateId === candidateRef.candidateId) ?? [];
@@ -74,11 +77,15 @@ export const PATCH = withRecoverableResponse(withUser(async (
                 data.confidence = candidate.confidence;
                 data.regionJson = regionJson;
             }
+            if (candidateRef !== undefined) {
+                // 更换或解除来源后，旧结论不再适用；选择候选本身不表示人工认可判分。
+                Object.assign(data, { result: null, awardedScore: null, gradingReason: null, gradingSource: null, reviewStatus: 'required' });
+            }
             const maxScore = changes.maxScore === undefined ? answer.maxScore : changes.maxScore;
             const awardedScore = regrade ? null : changes.awardedScore === undefined ? answer.awardedScore : changes.awardedScore;
-            if ((maxScore !== null && normalizeExamScore(maxScore) === null)
+            if (candidateRef === undefined && ((maxScore !== null && normalizeExamScore(maxScore) === null)
                 || (awardedScore !== null && (maxScore === null || awardedScore < 0 || awardedScore > maxScore
-                    || !Number.isFinite(awardedScore) || Math.abs(awardedScore * 10 - Math.round(awardedScore * 10)) > 1e-6))) {
+                    || !Number.isFinite(awardedScore) || Math.abs(awardedScore * 10 - Math.round(awardedScore * 10)) > 1e-6)))) {
                 throw new ReviewError(validationError('EXAM_ATTEMPT_SCORE_INVALID'));
             }
             const recognizedAnswer = typeof data.recognizedAnswer === 'string' || data.recognizedAnswer === null ? data.recognizedAnswer : answer.recognizedAnswer;

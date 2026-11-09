@@ -118,8 +118,14 @@ describe('纸质作答人工复核 API', () => {
     });
     it('候选映射只复制持久化信封中的答案、来源区域和置信度', async () => {
         const attempt = await fixture();
-        expect((await patch(attempt.id, { candidateRef: { pageOrder: 1, candidateId: 'saved-candidate' }, recognizedAnswer: '客户端伪造答案' })).status).toBe(200);
-        expect(await savedAnswer()).toMatchObject({ recognizedAnswer: '持久化答案', confidence: 0.73, gradingSource: 'manual', reviewStatus: 'reviewed', regionJson: JSON.stringify({ pageOrder: 1, candidateId: 'saved-candidate', regions }) });
+        await database.examAttemptAnswer.update({ where: { id: 'answer1' }, data: { result: 'correct', awardedScore: 5, gradingReason: '旧答案判对理由', gradingSource: 'manual', reviewStatus: 'reviewed' } });
+        const response = await patch(attempt.id, { candidateRef: { pageOrder: 1, candidateId: 'saved-candidate' } });
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.updatedAt).not.toBe(initial.toISOString());
+        expect(await savedAnswer()).toMatchObject({ recognizedAnswer: '持久化答案', confidence: 0.73, gradingSource: null, reviewStatus: 'required', result: null, awardedScore: null, gradingReason: null, maxScore: 5, regionJson: JSON.stringify({ pageOrder: 1, candidateId: 'saved-candidate', regions }) });
+        expect((await confirm(attempt.id, { expectedUpdatedAt: body.updatedAt })).status).toBe(400);
+        expect(await database.aiUsage.count()).toBe(0);
     });
     it.each([{ pageOrder: 2, candidateId: 'saved-candidate' }, { pageOrder: 1, candidateId: 'forged' }])('拒绝非本作答页中的候选：%j', async (candidateRef) => {
         const attempt = await fixture();
@@ -132,6 +138,94 @@ describe('纸质作答人工复核 API', () => {
         await database.examAttemptAnswer.create({ data: { attemptId: attempt.id, examQuestionId: 'q2', regionJson: JSON.stringify({ pageOrder: 1, candidateId: 'saved-candidate', regions }) } });
         expect((await patch(attempt.id, { candidateRef: { pageOrder: 1, candidateId: 'saved-candidate' } })).status).toBe(409);
         expect((await savedAnswer()).regionJson).toBeNull();
+    });
+    it.each([
+        { regrade: true, result: 'correct' }, { regrade: true, result: null },
+        { regrade: true, awardedScore: 5 }, { regrade: true, awardedScore: null },
+        { regrade: true, gradingReason: '人工理由' }, { regrade: true, gradingReason: null },
+        ...[null, { pageOrder: 1, candidateId: 'saved-candidate' }].flatMap((candidateRef) => [
+            { candidateRef, recognizedAnswer: '客户端答案' }, { candidateRef, result: 'correct' },
+            { candidateRef, awardedScore: 5 }, { candidateRef, gradingReason: '人工理由' },
+            { candidateRef, maxScore: 5 }, { candidateRef, regrade: true },
+            { candidateRef, recognizedAnswer: '客户端答案', result: 'correct', awardedScore: 5, maxScore: 5, gradingReason: '完整人工结论' },
+        ]),
+    ])('拒绝将来源变更、重判与人工结论混为一次操作：%j', async (body) => {
+        const attempt = await fixture();
+        const response = await patch(attempt.id, body);
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({ code: 'VALIDATION_ERROR', details: expect.arrayContaining([expect.objectContaining({ message: 'EXAM_ATTEMPT_REVIEW_ACTION_CONFLICT' })]) });
+        expect(await savedAnswer()).toMatchObject({ recognizedAnswer: '旧答案', result: 'wrong', awardedScore: 0, regionJson: null });
+        expect((await database.examAttempt.findUniqueOrThrow({ where: { id: attempt.id } })).updatedAt).toEqual(initial);
+        expect(await database.aiUsage.count()).toBe(0);
+    });
+    it('仅提交版本号仍可明确标记人工复核', async () => {
+        const attempt = await fixture();
+        expect((await patch(attempt.id)).status).toBe(200);
+        expect(await savedAnswer()).toMatchObject({ recognizedAnswer: '旧答案', result: 'wrong', awardedScore: 0, gradingSource: 'manual', reviewStatus: 'reviewed' });
+    });
+    it('没有候选关联时解除返回明确错误，不清除纯手工答案', async () => {
+        const attempt = await fixture();
+        const response = await patch(attempt.id, { candidateRef: null });
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({ message: 'EXAM_ATTEMPT_CANDIDATE_NOT_MAPPED', code: 'VALIDATION_ERROR' });
+        expect(await savedAnswer()).toMatchObject({ recognizedAnswer: '旧答案', result: 'wrong', awardedScore: 0 });
+        expect((await database.examAttempt.findUniqueOrThrow({ where: { id: attempt.id } })).updatedAt).toEqual(initial);
+    });
+    it('解除清除来源及派生结论，释放候选后可映射另一题并再次改回', async () => {
+        const attempt = await fixture();
+        await database.examQuestion.create({ data: { id: 'q2', sourceShortId: 'Q00002', paperId: attempt.paperId, order: 2, answerText: '标准答案', score: 5 } });
+        await database.examAttemptAnswer.create({ data: { id: 'answer2', attemptId: attempt.id, examQuestionId: 'q2', maxScore: 5 } });
+        const mapped = await (await patch(attempt.id, { candidateRef: { pageOrder: 1, candidateId: 'saved-candidate' } })).json();
+        await database.examAttemptAnswer.update({ where: { id: 'answer1' }, data: { result: 'correct', awardedScore: 5, gradingReason: '旧判分', reviewStatus: 'reviewed', gradingSource: 'ai' } });
+        const response = await patch(attempt.id, { candidateRef: null, expectedUpdatedAt: mapped.updatedAt });
+        expect(response.status).toBe(200);
+        const detached = await response.json();
+        expect(detached.updatedAt).not.toBe(mapped.updatedAt);
+        expect(await savedAnswer()).toMatchObject({ recognizedAnswer: null, confidence: null, regionJson: null, result: null, awardedScore: null, gradingReason: null, gradingSource: null, reviewStatus: 'required', maxScore: 5 });
+        const secondResponse = await patch(attempt.id, { candidateRef: { pageOrder: 1, candidateId: 'saved-candidate' }, expectedUpdatedAt: detached.updatedAt }, 'answer2');
+        expect(secondResponse.status).toBe(200);
+        const second = await secondResponse.json();
+        expect((await patch(attempt.id, { candidateRef: { pageOrder: 1, candidateId: 'saved-candidate' }, expectedUpdatedAt: second.updatedAt })).status).toBe(409);
+        const releasedResponse = await patch(attempt.id, { candidateRef: null, expectedUpdatedAt: second.updatedAt }, 'answer2');
+        expect(releasedResponse.status).toBe(200);
+        const released = await releasedResponse.json();
+        expect((await patch(attempt.id, { candidateRef: { pageOrder: 1, candidateId: 'saved-candidate' }, expectedUpdatedAt: released.updatedAt })).status).toBe(200);
+        expect(await savedAnswer()).toMatchObject({ recognizedAnswer: '持久化答案', confidence: 0.73, reviewStatus: 'required', result: null, awardedScore: null });
+        expect(await database.examAttemptAnswer.findUniqueOrThrow({ where: { id: 'answer2' } })).toMatchObject({ recognizedAnswer: null, regionJson: null, confidence: null });
+        expect(await database.aiUsage.count()).toBe(0);
+    });
+    it.each([null, { pageOrder: 1, candidateId: 'saved-candidate' }])('来源操作保留归属、确认态和版本保护：%j', async (candidateRef) => {
+        const attempt = await fixture();
+        const regionJson = JSON.stringify({ pageOrder: 1, candidateId: 'saved-candidate', regions });
+        await database.examAttemptAnswer.update({ where: { id: 'answer1' }, data: { regionJson, confidence: 0.73 } });
+        expect((await patch(attempt.id, { candidateRef, expectedUpdatedAt: '2020-01-01T00:00:00Z' })).status).toBe(409);
+        await database.examAttempt.update({ where: { id: attempt.id }, data: { status: 'confirmed', updatedAt: initial } });
+        expect((await patch(attempt.id, { candidateRef })).status).toBe(409);
+        const other = await database.user.create({ data: { email: 'candidate-other@example.com', password: 'test' } });
+        await database.examAttempt.update({ where: { id: attempt.id }, data: { userId: other.id, status: 'review', updatedAt: initial } });
+        expect((await patch(attempt.id, { candidateRef })).status).toBe(404);
+        expect(await savedAnswer()).toMatchObject({ regionJson, recognizedAnswer: '旧答案', confidence: 0.73 });
+    });
+    it('并发两个目标争抢同一候选时仅一个映射成功，刷新版本后仍不能重复映射', async () => {
+        const attempt = await fixture();
+        await database.examQuestion.create({ data: { id: 'q2', sourceShortId: 'Q00002', paperId: attempt.paperId, order: 2 } });
+        await database.examAttemptAnswer.create({ data: { id: 'answer2', attemptId: attempt.id, examQuestionId: 'q2', maxScore: 5 } });
+        const responses = await Promise.all(['answer1', 'answer2'].map((answerId) => patch(attempt.id, { candidateRef: { pageOrder: 1, candidateId: 'saved-candidate' } }, answerId)));
+        expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+        const allAnswers = await database.examAttemptAnswer.findMany({ where: { attemptId: attempt.id } });
+        expect(allAnswers.filter((answer) => answer.regionJson !== null)).toHaveLength(1);
+        const loser = allAnswers.find((answer) => answer.regionJson === null)!;
+        const latest = await database.examAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
+        expect((await patch(attempt.id, { candidateRef: { pageOrder: 1, candidateId: 'saved-candidate' }, expectedUpdatedAt: latest.updatedAt.toISOString() }, loser.id)).status).toBe(409);
+    });
+    it.each(['manual', 'regrade'])('映射后单独%s保持既有保存与重判语义', async (action) => {
+        const attempt = await fixture();
+        const mapped = await (await patch(attempt.id, { candidateRef: { pageOrder: 1, candidateId: 'saved-candidate' } })).json();
+        const changes = action === 'manual' ? { result: 'wrong', awardedScore: 2.5, gradingReason: '人工部分分' } : { regrade: true };
+        expect((await patch(attempt.id, { ...changes, expectedUpdatedAt: mapped.updatedAt })).status).toBe(200);
+        expect(await savedAnswer()).toMatchObject(action === 'manual'
+            ? { result: 'wrong', awardedScore: 2.5, gradingReason: '人工部分分', gradingSource: 'manual', reviewStatus: 'reviewed' }
+            : { result: 'correct', awardedScore: 5, gradingSource: 'ai', reviewStatus: 'required' });
     });
     it('相同版本并发手工保存仅一个成功', async () => {
         const attempt = await fixture();

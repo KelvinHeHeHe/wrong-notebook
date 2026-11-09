@@ -43,10 +43,20 @@ export const updateExamAttemptAnswerSchema = z.object({
     candidateRef: z.object({
         pageOrder: z.number().int().min(1).max(MAX_IMPORTED_EXAM_PAGES),
         candidateId: z.string().trim().min(1).max(200),
-    }).strict().optional(),
+    }).strict().nullable().optional(),
     regrade: z.boolean().optional(),
     expectedUpdatedAt: z.string().datetime({ offset: true }),
-}).strict();
+}).strict().superRefine((input, context) => {
+    const manualJudgment = ['result', 'awardedScore', 'gradingReason'] as const;
+    const answerChanges = ['recognizedAnswer', 'maxScore', ...manualJudgment] as const;
+    // 来源变更是独立动作；显式 null 同样表示请求了变更，不能按字段缺失处理。
+    if (input.candidateRef !== undefined && (input.regrade === true || answerChanges.some((key) => input[key] !== undefined))) {
+        context.addIssue({ code: 'custom', path: ['candidateRef'], message: 'EXAM_ATTEMPT_REVIEW_ACTION_CONFLICT' });
+    }
+    if (input.regrade === true && manualJudgment.some((key) => input[key] !== undefined)) {
+        context.addIssue({ code: 'custom', path: ['regrade'], message: 'EXAM_ATTEMPT_REVIEW_ACTION_CONFLICT' });
+    }
+});
 
 export const confirmExamAttemptSchema = z.object({
     expectedUpdatedAt: z.string().datetime({ offset: true }),
