@@ -134,6 +134,15 @@ describe('题目保存全局钩子', () => {
         expect(events[0].origin).toBe('manual');
     });
 
+    it('普通保存仍将非空错误答案规范化为 wrong_attempt', async () => {
+        const user = await database.user.findUniqueOrThrow({ where: { id: 'user-1' } });
+        const { importSchema } = await import('@/lib/question/question-save');
+        const body = importSchema.parse({ questionText, subjectId: 'math', wrongAnswerText: '不会做', mistakeStatus: 'not_attempted' });
+        const result = await saveQuestion(user, body);
+        expect(result.ok).toBe(true);
+        expect(await database.errorItem.findFirstOrThrow()).toMatchObject({ mistakeStatus: 'wrong_attempt', wrongAnswerText: '不会做' });
+    });
+
     it('识别导入任务：自动入库与校对确认路径钩子均收到 origin=import-task', async () => {
         await database.user.update({ where: { id: 'user-1' }, data: { confirmBeforeImport: false } });
         mocks.analyzeImage.mockResolvedValue({ questionText, answerText: 'x=3', analysis: '移项得 x = 3', knowledgePoints: [], subject: '数学', requiresImage: false, wrongAnswerText: '', mistakeAnalysis: '', mistakeStatus: 'unknown', gradeSemester: null });

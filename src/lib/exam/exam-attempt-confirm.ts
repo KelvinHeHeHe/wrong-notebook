@@ -109,6 +109,8 @@ export function confirmExamAttempt(input: {
                 errorItemId = duplicate?.id ?? (await createErrorItemInTransaction(tx, input.user, body, {
                     gradeSemester: attempt.paper.gradeSemester,
                     resolvedPaperLevel: null,
+                    // 最终复核结果优先于共享保存函数根据答案文字作出的状态推断。
+                    extraErrorItemData: { mistakeStatus: body.mistakeStatus },
                 })).id;
                 await tx.examQuestion.update({ where: { id: question.id }, data: { errorItemId } });
             }

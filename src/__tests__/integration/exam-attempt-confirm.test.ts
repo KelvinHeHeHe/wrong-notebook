@@ -78,7 +78,7 @@ describe('纸质作答确认事务', () => {
         const item = await database.errorItem.findFirstOrThrow();
         expect(result.affectedErrorItemIds).toEqual([item.id]);
         expect(result.summary).toMatchObject({ totalScore: 2.5, maxScore: 5 });
-        expect(item).toMatchObject({ subjectId: 'math', gradeSemester: '初一上', wrongAnswerText: 'x=4' });
+        expect(item).toMatchObject({ subjectId: 'math', gradeSemester: '初一上', wrongAnswerText: 'x=4', mistakeStatus: 'wrong_attempt' });
         expect(await sharp(Buffer.from(item.originalImageUrl.split(',')[1], 'base64')).metadata()).toMatchObject({ width: 50, height: 40 });
         expect((await database.examQuestion.findUniqueOrThrow({ where: { id: 'q1' } })).errorItemId).toBe(item.id);
         expect(await database.practiceRecord.findFirstOrThrow()).toMatchObject({ source: 'exam', errorItemId: item.id, wrongAnswerText: 'x=4', originalImageUrl: item.originalImageUrl });
@@ -89,13 +89,20 @@ describe('纸质作答确认事务', () => {
         await confirmExamAttempt(input);
         expect(await database.errorItem.findFirstOrThrow()).toMatchObject({ mistakeStatus: 'not_attempted', wrongAnswerText: null });
     });
+    it('最终未作答即使有识别文字，新错题仍为未作答并保留练习快照', async () => {
+        const { input } = await fixture({ result: 'not_attempted', awardedScore: 0, recognizedAnswer: '不会做' });
+        await confirmExamAttempt(input);
+        const item = await database.errorItem.findFirstOrThrow();
+        expect(item.mistakeStatus).toBe('not_attempted');
+        expect(await database.practiceRecord.findFirstOrThrow()).toMatchObject({ errorItemId: item.id, result: 'not_attempted', wrongAnswerText: '不会做' });
+    });
     it('未作答按题干判重复用，保留原错题内容且不写 duplicate_import', async () => {
-        const { input } = await fixture({ result: 'not_attempted', awardedScore: 0, recognizedAnswer: '' });
-        const item = await database.errorItem.create({ data: { userId: user.id, originalImageUrl: '原图', questionText: '求解方程：三倍未知数减六等于九', answerText: '原答案' } });
+        const { input } = await fixture({ result: 'not_attempted', awardedScore: 0, recognizedAnswer: '不会做' });
+        const item = await database.errorItem.create({ data: { userId: user.id, originalImageUrl: '原图', questionText: '求解方程：三倍未知数减六等于九', answerText: '原答案', mistakeStatus: 'wrong_attempt' } });
         const result = await confirmExamAttempt(input);
         expect(result.affectedErrorItemIds).toEqual([item.id]);
         expect(await database.errorItem.count()).toBe(1);
-        expect(await database.errorItem.findUniqueOrThrow({ where: { id: item.id } })).toMatchObject({ originalImageUrl: '原图', answerText: '原答案' });
+        expect(await database.errorItem.findUniqueOrThrow({ where: { id: item.id } })).toMatchObject({ originalImageUrl: '原图', answerText: '原答案', mistakeStatus: 'wrong_attempt' });
         expect(await database.practiceRecord.findFirstOrThrow()).toMatchObject({ source: 'exam', result: 'not_attempted', errorItemId: item.id });
         expect(await database.practiceRecord.count()).toBe(1);
     });
