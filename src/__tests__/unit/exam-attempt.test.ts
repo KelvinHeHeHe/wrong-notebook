@@ -132,10 +132,11 @@ describe('recognition 和区域 JSON 解析', () => {
         expect(readAttemptRegionPageOrder(raw)).toBe(1);
         expect(parseAttemptRegionJson(raw)).toBeNull();
         expect(readAttemptRegionPageOrder('{"pageOrder":2}')).toBe(2);
+        expect(readAttemptRegionPageOrder('{"pageOrder":20,"candidateId":"old","regions":[{"width":0}]}')).toBe(20);
     });
 
     it('只读页序拒绝坏 JSON、非对象、非整数和非正数，不猜测归属', () => {
-        for (const raw of [undefined, null, '', '{bad', 'null', '[]', '{}', '{"pageOrder":"1"}', '{"pageOrder":1.5}', '{"pageOrder":0}', '{"pageOrder":-1}']) {
+        for (const raw of [undefined, null, '', '{bad', 'null', '[]', '{}', '{"pageOrder":null}', '{"pageOrder":"1"}', '{"pageOrder":1.5}', '{"pageOrder":0}', '{"pageOrder":-1}', '{"pageOrder":21}']) {
             expect(readAttemptRegionPageOrder(raw)).toBeNull();
         }
     });

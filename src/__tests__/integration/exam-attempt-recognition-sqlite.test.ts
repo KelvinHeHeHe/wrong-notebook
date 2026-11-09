@@ -61,6 +61,30 @@ async function fixture(consented = true) {
 }
 
 describe('纸质作答识别所有权与真实 SQLite 额度', () => {
+    it.each([20, 21])('旧备份页归属边界 %s：保留合法页，超限页不阻塞当前识别', async (sourceOrder) => {
+        const input = await fixture();
+        const question = await database.examQuestion.findFirstOrThrow();
+        if (sourceOrder === 20) await database.examAttemptPage.create({ data: {
+            attemptId: input.attemptId, order: 20, checksum: 'page-twenty', imageData: 'data:image/png;base64,REVG', mimeType: 'image/png',
+        } });
+        const previous = await database.examAttemptAnswer.create({ data: {
+            attemptId: input.attemptId, examQuestionId: question.id, recognizedAnswer: '旧备份答案', result: 'wrong', awardedScore: 2,
+            maxScore: 5, gradingSource: 'ai', reviewStatus: 'required',
+            regionJson: JSON.stringify({ pageOrder: sourceOrder, candidateId: 'old-backup', regions: [] }),
+        } });
+        const grade = vi.fn(async () => ({ correct: true, reason: '合法页判分' }));
+        mocks.service.mockResolvedValue({ extractExamPageAnswers: vi.fn(async () => ({ candidates: [{
+            sourceShortId: 'SOURCE', displayNumber: 1, recognizedAnswer: '合法页答案', notAttempted: false, confidence: 0.99, regions: [],
+        }] })), gradeAnswer: grade });
+        const result = await recognizeExamAttemptPages(input);
+        expect(result.successes).toEqual([{ pageOrder: 1, candidateCount: 1, matchedCount: sourceOrder === 20 ? 0 : 1 }]);
+        const saved = await database.examAttemptAnswer.findUniqueOrThrow({ where: { id: previous.id } });
+        expect(saved).toMatchObject(sourceOrder === 20
+            ? { recognizedAnswer: '旧备份答案', awardedScore: 2, reviewStatus: 'required' }
+            : { recognizedAnswer: '合法页答案', awardedScore: 5, reviewStatus: 'pending' });
+        expect(JSON.parse(saved.regionJson!).pageOrder).toBe(sourceOrder === 20 ? 20 : 1);
+        expect(grade).toHaveBeenCalledTimes(sourceOrder === 20 ? 0 : 1);
+    });
     it.each([false, true])('人工 reviewed 被竞争降为 required 后换页保留内容，旧退化区域=%s', async (degenerated) => {
         const input = await fixture();
         const question = await database.examQuestion.findFirstOrThrow();

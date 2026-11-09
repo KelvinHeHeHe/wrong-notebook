@@ -1,4 +1,5 @@
 import type { ExamPageAnswerCandidate, ExamPageAnswerExtractionResult } from '@/lib/ai/exam-answer-extraction';
+import { MAX_IMPORTED_EXAM_PAGES } from '@/lib/schemas/exam';
 
 export const EXAM_ANSWER_REVIEW_CONFIDENCE = 0.80;
 
@@ -336,14 +337,14 @@ export function summarizeExamAttemptScores(answers: ExamAttemptScoreAnswer[]): E
     };
 }
 
-/** 仅恢复合法正整数页序，供换页失效和归属判断使用；不表示坐标可用于裁图。 */
+/** 仅恢复页数上限内的正整数页序，供失效和归属判断使用；不表示坐标可用于裁图。 */
 export function readAttemptRegionPageOrder(raw: string | null | undefined): number | null {
     if (!raw) return null;
     try {
         const value: unknown = JSON.parse(raw);
         if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
         const order = (value as { pageOrder?: unknown }).pageOrder;
-        return typeof order === 'number' && Number.isInteger(order) && order > 0 ? order : null;
+        return typeof order === 'number' && Number.isInteger(order) && order > 0 && order <= MAX_IMPORTED_EXAM_PAGES ? order : null;
     } catch {
         return null;
     }
