@@ -10,14 +10,13 @@ import { conflict, createErrorResponse, ErrorCode, notFound, validationError } f
 import type { ApiErrorResponse } from '@/lib/api-errors';
 import {
     buildAttemptPageRecognition, matchExamAnswerCandidates, parseAttemptPageRecognition,
-    parseAttemptRegionJson, requiresExamAnswerReview, resolveExamAnswerCandidateTargets, serializeAttemptPageRecognition, suggestExamAnswerScore,
+    readAttemptRegionPageOrder, requiresExamAnswerReview, resolveExamAnswerCandidateTargets, serializeAttemptPageRecognition, suggestExamAnswerScore,
 } from '@/lib/exam/exam-attempt';
 import type { ExamAttemptAnswerCandidate, ExamAttemptMatchQuestion, ExamAttemptPageRecognition } from '@/lib/exam/exam-attempt';
 import { buildExamPrintLayout } from '@/lib/exam/exam-sections';
 import { createLogger } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import { normalizeQuestionType } from '@/lib/question/question-type';
-import { MAX_IMPORTED_EXAM_PAGES } from '@/lib/schemas/exam';
 
 const logger = createLogger('exam-attempt-recognition');
 const attemptInclude = {
@@ -60,21 +59,6 @@ function reject(message: string, status: number): never {
 
 function nextVersion(previous: Date): Date {
     return new Date(Math.max(Date.now(), previous.getTime() + 1));
-}
-
-/** 旧版退化区域可能无法完整解析；只恢复经过校验的页归属，不复用坏坐标。 */
-function answerPageOrder(raw: string | null | undefined): number | null {
-    const region = parseAttemptRegionJson(raw);
-    if (region) return region.pageOrder;
-    if (!raw) return null;
-    try {
-        const value: unknown = JSON.parse(raw);
-        if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-        const order = (value as { pageOrder?: unknown }).pageOrder;
-        return typeof order === 'number' && Number.isInteger(order) && order >= 1 && order <= MAX_IMPORTED_EXAM_PAGES ? order : null;
-    } catch {
-        return null;
-    }
 }
 
 /** 失败时合并同一图片的旧材料与本轮候选；稳定 ID 去重，来源引用保持有效。 */
@@ -124,7 +108,7 @@ function competingQuestionIds(
     }
     const existingOrders = new Set(pages.map((page) => page.order));
     for (const answer of answers) {
-        const owner = answerPageOrder(answer.regionJson);
+        const owner = readAttemptRegionPageOrder(answer.regionJson);
         if (owner !== null && existingOrders.has(owner)) addClaim(answer.examQuestionId, owner);
     }
     return [...touched].filter((questionId) => repeated.has(questionId) || (claims.get(questionId)?.size ?? 0) > 1);
@@ -263,7 +247,7 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
             const matching = matchExamAnswerCandidates(envelope.candidates, matchingQuestions);
             const ownedMatches = matching.matches.filter((match) => {
                 const existing = current.answers.find((answer) => answer.examQuestionId === match.questionId);
-                const owner = answerPageOrder(existing?.regionJson);
+                const owner = readAttemptRegionPageOrder(existing?.regionJson);
                 return owner === null || owner === page.order;
             });
             matchedCount = ownedMatches.length;
@@ -302,13 +286,13 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
             // 提取失败保留已有草稿；成功重识别才清除该页不再匹配的非人工答案。
             if (recognition.status === 'succeeded') {
                 const obsolete = current.answers.filter((answer) => answer.reviewStatus !== 'reviewed' && !preserveManualAnswer(answer, replaceReviewed)
-                    && answerPageOrder(answer.regionJson) === page.order && !drafts.has(answer.examQuestionId));
+                    && readAttemptRegionPageOrder(answer.regionJson) === page.order && !drafts.has(answer.examQuestionId));
                 if (obsolete.length) await tx.examAttemptAnswer.deleteMany({
                     where: { attemptId, id: { in: obsolete.map((answer) => answer.id) }, reviewStatus: { not: 'reviewed' } },
                 });
                 for (const [examQuestionId, data] of drafts) {
                     const existing = current.answers.find((answer) => answer.examQuestionId === examQuestionId);
-                    const owner = answerPageOrder(existing?.regionJson);
+                    const owner = readAttemptRegionPageOrder(existing?.regionJson);
                     if (owner !== null && owner !== page.order) continue;
                     if (existing) {
                         await tx.examAttemptAnswer.updateMany({
@@ -369,7 +353,7 @@ export async function recognizeExamAttemptPages(input: RecognizeExamAttemptPages
                 const recognition = page.recognitionResult ? parseAttemptPageRecognition(page.recognitionResult) : null;
                 return recognition !== null && (recognition.status === 'succeeded' || recognition.candidates.length > 0);
             }) || current.answers.some((answer) => answer.reviewStatus === 'reviewed' || answer.recognizedAnswer !== null
-                || answer.result !== null || answerPageOrder(answer.regionJson) !== null);
+                || answer.result !== null || readAttemptRegionPageOrder(answer.regionJson) !== null);
             finalStatus = hasResults ? 'review' : 'failed';
             const updatedAt = nextVersion(version);
             const saved = await tx.examAttempt.updateMany({

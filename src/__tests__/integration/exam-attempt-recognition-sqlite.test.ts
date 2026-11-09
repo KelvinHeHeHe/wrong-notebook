@@ -61,13 +61,13 @@ async function fixture(consented = true) {
 }
 
 describe('纸质作答识别所有权与真实 SQLite 额度', () => {
-    it('人工 reviewed 被跨页竞争降为 required 后，替换来源页保留人工内容并清除位置与置信度', async () => {
+    it.each([false, true])('人工 reviewed 被竞争降为 required 后换页保留内容，旧退化区域=%s', async (degenerated) => {
         const input = await fixture();
         const question = await database.examQuestion.findFirstOrThrow();
         const manual = await database.examAttemptAnswer.create({ data: {
             attemptId: input.attemptId, examQuestionId: question.id, recognizedAnswer: '人工保留的答案', result: 'wrong',
             awardedScore: 2.5, maxScore: 5, gradingSource: 'manual', gradingReason: '人工保留的判分说明', reviewStatus: 'reviewed', confidence: 0.98,
-            regionJson: JSON.stringify({ pageOrder: 1, candidateId: 'manual-source', regions: [] }),
+            regionJson: JSON.stringify({ pageOrder: 1, candidateId: 'manual-source', regions: degenerated ? [{ x: 1, y: 0, width: 0, height: 0.5 }] : [] }),
         } });
         await database.examAttemptPage.create({ data: { attemptId: input.attemptId, order: 2, checksum: 'second', imageData: 'data:image/png;base64,REVG', mimeType: 'image/png' } });
         mocks.service.mockResolvedValue({ extractExamPageAnswers: vi.fn(async () => ({ candidates: [{
@@ -89,6 +89,12 @@ describe('纸质作答识别所有权与真实 SQLite 额度', () => {
             recognizedAnswer: manual.recognizedAnswer, result: manual.result, awardedScore: manual.awardedScore,
             maxScore: manual.maxScore, gradingReason: manual.gradingReason, gradingSource: 'manual', reviewStatus: 'required',
             regionJson: null, confidence: null,
+        });
+        const retry = await recognizeExamAttemptPages({ ...input, pageOrders: [2], expectedUpdatedAt: body.updatedAt });
+        expect(retry.successes).toEqual([{ pageOrder: 2, candidateCount: 1, matchedCount: 1 }]);
+        expect(await database.examAttemptAnswer.findUnique({ where: { id: manual.id } })).toMatchObject({
+            recognizedAnswer: manual.recognizedAnswer, awardedScore: manual.awardedScore, gradingReason: manual.gradingReason,
+            gradingSource: 'manual', reviewStatus: 'required', regionJson: null, confidence: null,
         });
     });
     it('跨页同题竞争在真实数据库中强制复核，阻止确认和历史入账', async () => {

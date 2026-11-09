@@ -336,6 +336,19 @@ export function summarizeExamAttemptScores(answers: ExamAttemptScoreAnswer[]): E
     };
 }
 
+/** 仅恢复合法正整数页序，供换页失效和归属判断使用；不表示坐标可用于裁图。 */
+export function readAttemptRegionPageOrder(raw: string | null | undefined): number | null {
+    if (!raw) return null;
+    try {
+        const value: unknown = JSON.parse(raw);
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+        const order = (value as { pageOrder?: unknown }).pageOrder;
+        return typeof order === 'number' && Number.isInteger(order) && order > 0 ? order : null;
+    } catch {
+        return null;
+    }
+}
+
 /** 校验持久化的页序、候选引用和区域列表；任何非法数据均安全返回 null。 */
 export function parseAttemptRegionJson(raw: string | null | undefined): ExamAttemptRegionJson | null {
     if (!raw) return null;

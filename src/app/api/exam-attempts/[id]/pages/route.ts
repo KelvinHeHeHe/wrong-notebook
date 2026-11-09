@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { conflict, internalError, notFound, validationError } from '@/lib/api-errors';
 import { withUser } from '@/lib/api-handler';
 import type { AuthenticatedContext } from '@/lib/api-handler';
-import { parseAttemptRegionJson } from '@/lib/exam/exam-attempt';
+import { readAttemptRegionPageOrder } from '@/lib/exam/exam-attempt';
 import { ExamPageImageError, validateExamPageImages } from '@/lib/exam/exam-page-image';
 import { createLogger } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
@@ -90,8 +90,8 @@ export const POST = withUser(async (
                     where: { attemptId: id }, select: { id: true, reviewStatus: true, gradingSource: true, regionJson: true },
                 });
                 const affected = answers.filter((answer) => {
-                    const region = parseAttemptRegionJson(answer.regionJson);
-                    return region !== null && replacedOrders.has(region.pageOrder);
+                    const pageOrder = readAttemptRegionPageOrder(answer.regionJson);
+                    return pageOrder !== null && replacedOrders.has(pageOrder);
                 });
                 const preserved = affected.filter((answer) => answer.reviewStatus === 'reviewed' || answer.gradingSource === 'manual');
                 const preservedIds = new Set(preserved.map((answer) => answer.id));

@@ -6,6 +6,7 @@ import {
     resolveExamAnswerCandidateTargets,
     parseAttemptPageRecognition,
     parseAttemptRegionJson,
+    readAttemptRegionPageOrder,
     requiresExamAnswerReview,
     serializeAttemptPageRecognition,
     suggestExamAnswerScore,
@@ -126,6 +127,18 @@ describe('suggestExamAnswerScore 与 summarizeExamAttemptScores', () => {
 });
 
 describe('recognition 和区域 JSON 解析', () => {
+    it('只读页序兼容旧退化区域，不放宽实际坐标的严格解析', () => {
+        const raw = JSON.stringify({ pageOrder: 1, candidateId: 'old', regions: [{ x: 1, y: 0, width: 0, height: 0.5 }] });
+        expect(readAttemptRegionPageOrder(raw)).toBe(1);
+        expect(parseAttemptRegionJson(raw)).toBeNull();
+        expect(readAttemptRegionPageOrder('{"pageOrder":2}')).toBe(2);
+    });
+
+    it('只读页序拒绝坏 JSON、非对象、非整数和非正数，不猜测归属', () => {
+        for (const raw of [undefined, null, '', '{bad', 'null', '[]', '{}', '{"pageOrder":"1"}', '{"pageOrder":1.5}', '{"pageOrder":0}', '{"pageOrder":-1}']) {
+            expect(readAttemptRegionPageOrder(raw)).toBeNull();
+        }
+    });
     it('安全解析和序列化 v1 信封，拒绝未知版本', () => {
         const value = buildAttemptPageRecognition(1, { candidates: [candidate()] }, '2026-11-09T00:00:00.000Z');
         expect(parseAttemptPageRecognition(serializeAttemptPageRecognition(value))).toEqual(value);
