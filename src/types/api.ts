@@ -548,3 +548,56 @@ export interface ExamAttemptRecognitionResponse {
     successes: Array<{ pageOrder: number; candidateCount: number; matchedCount: number }>;
     failures: Array<{ pageOrder: number; error: string }>;
 }
+
+export interface ExamAttemptPageDetail {
+    id: string;
+    attemptId: string;
+    order: number;
+    imageData?: string;
+    mimeType: string;
+    width: number | null;
+    height: number | null;
+    checksum: string;
+    recognitionResult: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface ExamAttemptAnswerDetail {
+    id: string;
+    attemptId: string;
+    examQuestionId: string;
+    recognizedAnswer: string | null;
+    result: PracticeResult | null;
+    awardedScore: number | null;
+    maxScore: number | null;
+    gradingSource: 'ai' | 'manual' | null;
+    gradingReason: string | null;
+    confidence: number | null;
+    reviewStatus: 'pending' | 'required' | 'reviewed';
+    regionJson: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface ExamAttemptDetail extends Omit<ExamAttemptSummary, 'pageCount'> {
+    userId: string;
+    paper: Pick<ExamPaperDetail, 'id' | 'title' | 'status' | 'origin'>;
+    answers: ExamAttemptAnswerDetail[];
+    pages: ExamAttemptPageDetail[];
+}
+
+export interface ExamAttemptAnswerUpdate {
+    recognizedAnswer?: string | null;
+    result?: PracticeResult | null;
+    awardedScore?: number | null;
+    maxScore?: number | null;
+    gradingReason?: string | null;
+    candidateRef?: { pageOrder: number; candidateId: string };
+    regrade?: boolean;
+}
+
+export interface ExamAttemptAnswerUpdateResponse {
+    answer: ExamAttemptAnswerDetail;
+    updatedAt: string;
+}
