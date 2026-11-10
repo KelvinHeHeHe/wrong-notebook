@@ -14,7 +14,7 @@ The JSON export does not include full user accounts with passwords, AI data shar
 
 ## Web export and import
 
-Export JSON from the data management section in the settings and keep it safe. When a regular user imports, the email in the export file must match the current account; admins can import and export data for all users.
+Export JSON from the data management section in the settings and keep it safe. When a regular user imports, the email in the export file normally must match the current account; a backup from another account can be merged into the current account after confirmation, with notebooks, tags, questions and exam papers all assigned to the current account and the other account's preferences not restored. Admins can import and export data for all users.
 
 ### Export JSON (Question Exchange Format)
 
@@ -31,7 +31,7 @@ System and custom tags retain their tag system and parent-child hierarchy. Ident
 
 Question figures, GeoGebra demos, Chinese and English SVG animations with their synthesized cloud voice (MP3), the latest similar question and mastery probability are all restored from the export file; SVG is sanitized again on import, and questions without a mastery probability are re-evaluated after import. Exam papers are restored together with their questions and every recorded result; questions still being generated at export time show as failed after import and can be regenerated on the exam page. Importing your own export file also restores preferences such as the question grade rule and fixed grade, review before import, the duplicate threshold, GeoGebra demos, SVG animations and the interface theme.
 
-Export files use version 11, which includes unprocessed recognition tasks (drafts awaiting review and failed tasks, with the question image or question text and the recognition result) and unfinished multi-question batches (split drafts with your adjustments, batches whose split failed, and started batches with questions not yet imported); saved tasks and fully imported batches are not exported. On import, review drafts and split drafts stay as they were; all other tasks, including those still recognizing or saving at export time, show as failed, and batches that were still splitting show as split failed, so you can retry them when needed. Importing never calls the AI. Tasks of a batch stay in their batch after import, and importing the same file again creates nothing new. Older backups without these fields import as before.
+Export files use version 12, which includes unprocessed recognition tasks (drafts awaiting review and failed tasks, with the question image or question text, the recognition result and the question source) and unfinished multi-question batches (split drafts with your adjustments, batches whose split failed, and started batches with questions not yet imported); saved tasks and fully imported batches are not exported. On import, review drafts and split drafts stay as they were; all other tasks, including those still recognizing or saving at export time, show as failed, and batches that were still splitting show as split failed, so you can retry them when needed. Importing never calls the AI. Tasks of a batch stay in their batch after import, and importing the same file again creates nothing new. Older backups without these fields import as before.
 
 Version 7 adds an `extensions` namespace for fork projects to store private extension data (such as question-bank metadata). `extensions` is organized as `<key>: { version, data }`; each extension manages its own version. The upstream exports an empty object `{}` by default; on import, unregistered keys are safely skipped with a warning, and extensions newer than the running program are skipped as well. Fork projects can register extensions in the `BACKUP_EXTENSIONS` array in `src/lib/backup-extensions.ts`.
 
@@ -69,6 +69,109 @@ tar -tzf "$backup_file"
 If the backup fails, do not continue with the upgrade; fix the cause and confirm the service is back first. When using the built-in HTTPS, add `certs/` to the archive, along with any other deployment files.
 
 Backups may contain question images, user profiles, password hashes and AI credentials. Restrict access, keep them in a separate location, check that the archive can be read, and verify the restore process in an isolated environment.
+
+## Unraid full-site backup and restore
+
+On Unraid the container data lives in `/mnt/user/appdata/wrong-notebook` (`data/` and `config/`). The container environment variables (`NEXTAUTH_SECRET`, `NEXTAUTH_URL`) are stored in Unraid's container configuration, not inside appdata, so record them separately when moving or recreating the container.
+If the container name is not `wrong-notebook`, replace that name in the commands below with the actual one.
+
+Stop the container before archiving so the SQLite data file, its WAL/SHM files and the configuration stay consistent:
+
+```bash
+appdata=/mnt/user/appdata/wrong-notebook
+backups=/mnt/user/backups/wrong-notebook
+mkdir -p "$backups"
+docker stop wrong-notebook
+backup_file="$backups/wrong-notebook-$(date +%Y%m%d-%H%M%S).tar.gz"
+tar -czf "$backup_file" -C /mnt/user/appdata wrong-notebook
+docker start wrong-notebook
+tar -tzf "$backup_file"
+```
+
+When using the built-in HTTPS or additional certificate mounts, add those directories to the archive too. You can also use Unraid's **Appdata Backup** plugin: add `/mnt/user/appdata/wrong-notebook` to its backup set; the plugin stops the container before archiving. Restore with the plugin, or follow the manual steps below.
+
+If the backup fails, do not continue with the upgrade; fix the cause and confirm the container is running again first. Archives may contain question images, user profiles, password hashes and AI credentials, so restrict access and keep them in a separate location.
+
+Restore steps:
+
+1. Confirm the backup time, source version and archive contents, and record the current container's Repository tag, port, path mappings and all environment variables.
+2. Stop the container on the Docker page.
+3. Move the current `/mnt/user/appdata/wrong-notebook` to a backup location, then unpack the archive into `/mnt/user/appdata`:
+
+   ```bash
+   tar -xzf "$backups/wrong-notebook-YYYYMMDD-HHMMSS.tar.gz" -C /mnt/user/appdata
+   ```
+
+4. Keep the original container's path mappings and `NEXTAUTH_SECRET`, and prefer the image version that matches the backup. After starting, sign in and check users, questions, tags, answer history and exam papers.
+5. When an upgrade is needed, run the [upgrade steps](Deployment-en#unraid-docker-ui) separately after the restore has been verified.
+
+Do not switch an old database back and forth between incompatible versions. If the restored container does not match the backup version, verify the data first, then switch images following the upgrade steps.
+
+## Synology Container Manager full-site backup and restore
+
+The data directory is `/volume1/docker/wrong-notebook` (`data/` and `config/`); container environment variables are stored in Container Manager's container configuration, so record them separately when moving or recreating the container. If the container name is not `wrong-notebook`, replace that name in the commands.
+
+Stop the container before archiving:
+
+```bash
+appdata=/volume1/docker/wrong-notebook
+backups=/volume1/backups/wrong-notebook
+mkdir -p "$backups"
+docker stop wrong-notebook
+backup_file="$backups/wrong-notebook-$(date +%Y%m%d-%H%M%S).tar.gz"
+tar -czf "$backup_file" -C /volume1/docker wrong-notebook
+docker start wrong-notebook
+tar -tzf "$backup_file"
+```
+
+You can also use DSM's **Hyper Backup**: add `/volume1/docker/wrong-notebook` to a backup task and stop the container before the task runs; restore with Hyper Backup, or follow the manual steps below. Archives may contain question images, user profiles, password hashes and AI credentials, so restrict access and keep them in a separate location.
+
+Restore:
+
+1. Record the current container's image tag, port, volume mappings and all environment variables.
+2. Stop the container in Container Manager.
+3. Move the current `/volume1/docker/wrong-notebook` to a backup location, then unpack the archive into `/volume1/docker`:
+
+   ```bash
+   tar -xzf "$backups/wrong-notebook-YYYYMMDD-HHMMSS.tar.gz" -C /volume1/docker
+   ```
+
+4. Keep the original container's volume mappings and `NEXTAUTH_SECRET`, and prefer the image version that matches the backup. After starting, sign in and check users, questions, tags, answer history and exam papers.
+5. When an upgrade is needed, run the [upgrade steps](Deployment-en#synology-dsm-container-manager) separately after the restore has been verified.
+
+## QNAP Container Station full-site backup and restore
+
+The data directory is `/share/Container/wrong-notebook` (`data/` and `config/`); container environment variables are stored in Container Station's container configuration, so record them separately when moving or recreating the container. If the container name is not `wrong-notebook`, replace that name in the commands.
+
+Stop the container before archiving:
+
+```bash
+appdata=/share/Container/wrong-notebook
+backups=/share/Backups/wrong-notebook
+mkdir -p "$backups"
+docker stop wrong-notebook
+backup_file="$backups/wrong-notebook-$(date +%Y%m%d-%H%M%S).tar.gz"
+tar -czf "$backup_file" -C /share/Container wrong-notebook
+docker start wrong-notebook
+tar -tzf "$backup_file"
+```
+
+You can also use QNAP's **Hybrid Backup Sync**: add `/share/Container/wrong-notebook` to a backup task and stop the container before the task runs; restore with Hybrid Backup Sync, or follow the manual steps below. Archives may contain question images, user profiles, password hashes and AI credentials, so restrict access and keep them in a separate location.
+
+Restore:
+
+1. Record the current container's image tag, port, volume mappings and all environment variables.
+2. Stop the container in Container Station.
+3. Move the current `/share/Container/wrong-notebook` to a backup location, then unpack the archive into `/share/Container`:
+
+   ```bash
+   tar -xzf "$backups/wrong-notebook-YYYYMMDD-HHMMSS.tar.gz" -C /share/Container
+   ```
+
+4. Keep the original container's volume mappings and `NEXTAUTH_SECRET`, and prefer the image version that matches the backup. After starting, sign in and check users, questions, tags, answer history and exam papers.
+5. When an upgrade is needed, run the [upgrade steps](Deployment-en#qnap-qts-container-station) separately after the restore has been verified.
+
+
 
 ## Restore the whole site
 

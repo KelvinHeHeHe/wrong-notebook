@@ -49,6 +49,7 @@ export const importSchema = z.object({
     geogebraCommands: z.string().nullish(),
     // 宽松接受：无法识别的题型在保存时规范化为 null，不因此拒绝整题
     questionType: z.string().max(200).nullish(),
+    source: z.string().trim().max(200).nullish(),
 });
 
 export type ImportQuestionInput = z.infer<typeof importSchema>;

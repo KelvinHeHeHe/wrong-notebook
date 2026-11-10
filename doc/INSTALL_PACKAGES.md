@@ -9,13 +9,15 @@
 | macOS | `WrongNotebook-Mac-<版本>-arm64.dmg`（Apple 芯片）/ `-x64.dmg`（Intel），另有同名 `.zip` | 本地自签名（ad-hoc），未经 Apple 公证；首次打开需到「系统设置 → 隐私与安全性」点击「仍要打开」 |
 | Linux | `WrongNotebook-Linux-<版本>-<架构>.AppImage` / `.deb` | x86_64 与 arm64 |
 | 飞牛OS | `WrongNotebook-FnOS-<版本>-x86.fpk` / `-arm.fpk` | 在应用中心手动安装，依赖应用中心的 Node.js v24 |
+| 群晖 DSM | `WrongNotebook-Synology-<版本>.spk` | 套件中心手动安装；Docker 套件，需 Container Manager |
+| 威联通 QTS | `WrongNotebook-QNAP-<版本>.qpkg` | App Center 手动安装；Docker 套件，需 Container Station |
 | 安卓手机 | `WrongNotebook-Android-Phone-<版本>.apk` | 单机版，内置服务端，无需部署服务器；锁定竖屏 |
 | 安卓平板 | `WrongNotebook-Android-Tablet-<版本>.apk` | 单机版，内置服务端，无需部署服务器；横竖屏自动旋转 |
 | 安卓手机 / 平板（客户端） | `WrongNotebook-Android-Client-Phone-<版本>.apk` / `-Client-Tablet-<版本>.apk` | 客户端版，连接已部署的服务器 |
 
 校验和见 Release 中的 `SHA256SUMS.txt`。
 
-除安卓客户端版外，所有安装包（含安卓单机版）运行同一个服务端（Next.js standalone 构建）和启动器 `packaging/runtime/launcher.js`，行为与 Docker 镜像一致：
+除安卓客户端版和群晖/威联通 Docker 套件外，所有安装包（含安卓单机版）运行同一个服务端（Next.js standalone 构建）和启动器 `packaging/runtime/launcher.js`，行为与 Docker 镜像一致；群晖/威联通套件直接运行同版本 Docker 镜像：
 
 - 首次启动复制预置数据库（含系统标签，不含管理员）。服务启动后在日志中打印一次性初始化链接，令牌同时保存在数据目录的 `config/setup-token`；打开链接设置管理员账号后令牌即删除。桌面版和安卓单机版会自动打开该链接。
 - 每次启动执行 `prisma migrate deploy`，只做增量迁移，升级保留已有数据。
@@ -53,6 +55,24 @@ wrong-notebook --port 3000 --host 0.0.0.0 --data-dir ~/.wrong-notebook
 3. 安装后从桌面图标打开，用向导中设置的账号登录，服务端口 39300，局域网内其他设备也可通过 `http://<NAS 地址>:39300` 访问。
 
 数据保存在应用数据目录（`@appdata/wrongnotebook`），日志为其中的 `wrong-notebook.log`。保留旧数据重装时沿用原有账号，向导中填写的管理员会被忽略；向导设置失败时（见 `install.log`），改用 `wrong-notebook.log` 中的初始化链接。
+
+### 群晖 DSM
+
+1. 先在套件中心安装 **Container Manager**。
+2. 套件中心 →「手动安装」，选择 `WrongNotebook-Synology-<版本>.spk`；DSM 7.0 及以上，套件为 noarch，不依赖 NAS 的 Node.js。
+3. 套件脚本检查 Docker、拉取 `ghcr.io/margrop/wrong-notebook:<版本>`、生成 `NEXTAUTH_SECRET`、映射主机端口 `39300` → 容器 `3000`，数据放在套件所在存储卷的 `/docker/wrong-notebook/{data,config}`。
+4. 套件中心的「打开」进入应用，首次启动按页面提示设置管理员。升级套件会按新镜像重建容器并保留数据；卸载套件保留数据目录，重装后可继续使用。
+
+套件只管理容器，不内置 Node.js；需保持 Container Manager 运行。套件中心的套件图标和「打开」链接由 `INFO` 的 `adminport`/`adminurl` 提供。
+
+### 威联通 QTS
+
+1. 先在 App Center 安装 **Container Station**。
+2. App Center →「手动安装」，选择 `WrongNotebook-QNAP-<版本>.qpkg`；套件为 noarch，不依赖 NAS 的 Node.js。
+3. 套件脚本检查 Docker、拉取同版本镜像、生成 `NEXTAUTH_SECRET`、映射主机端口 `39300` → 容器 `3000`，数据放在 `/share/Container/wrong-notebook/{data,config}`。
+4. App Center 的打开链接进入应用，首次启动按页面提示设置管理员。升级套件会按新镜像重建容器并保留数据；卸载套件保留数据目录，重装后可继续使用。
+
+套件只管理容器，不内置 Node.js；需保持 Container Station 运行。
 
 ### 安卓手机 / 平板
 
@@ -93,7 +113,7 @@ App 切到后台后系统可能结束服务端进程，回到前台时会自动�
 两种 App 都补齐了 WebView 默认不具备的能力：
 
 - 网页的「拍照」「相册」「从文件选择」分别打开系统相机、照片选择器（Android 13 起为系统照片选择器）和文件选择器；拍照调用系统相机应用，App 不申请相机权限，相机不可用时提示改用相册或文件。「从文件选择」不限类型，图片类入口额外列出 HEIC/HEIF 类型，便于选到被系统标成未知类型的照片。
-- 导出备份、下载试卷等文件通过系统「另存为」保存。
+- 导出备份、下载试卷等文件通过系统「另存为」保存；保存完成后提示「已保存到 <文件名>」，取消时不误报导出成功。导出文件可能很大（含题目原图、云端语音），网页分块写入 App 目录的临时文件后再复制到用户选择的位置，保存对话框期间 App 被系统回收也不会丢失内容。
 - 打印预览中的「打印」调用系统打印，可另存为 PDF。
 - 错题本以外的链接（项目主页、AI 服务商控制台等）用系统浏览器打开。
 
@@ -101,7 +121,7 @@ App 切到后台后系统可能结束服务端进程，回到前台时会自动�
 
 ## 本地构建
 
-需要 Node.js 22.15 及以上。Prisma 引擎与构建机平台一致，桌面版和飞牛OS 包须在目标平台（及架构）上构建。
+需要 Node.js 22.15 及以上。Prisma 引擎与构建机平台一致，桌面版和飞牛OS 包须在目标平台（及架构）上构建；群晖/威联通套件为 noarch Docker 套件，可在任意 Linux 构建。
 
 ```bash
 npm ci
@@ -109,9 +129,13 @@ node scripts/package/build.mjs bundle                 # 构建通用服务端包
 node scripts/package/build.mjs npm                    # dist/wrong-notebook-<版本>.tgz
 node scripts/package/build.mjs desktop --mac --arm64  # 参数原样传给 electron-builder
 node scripts/package/build.mjs fnos --arch x86        # 需要 PATH 中有 fnpack
+node scripts/package/build.mjs synology                # 群晖 SPK，无需 bundle
+node scripts/package/build.mjs qnap                    # 威联通 QPKG，需要 PATH 中有 QDK qbuild
 bash scripts/package/build-android-prisma-engines.sh dist/android-prisma-engines  # 安卓单机版需要的 Prisma 引擎
 node scripts/package/build.mjs android                # 单机版和客户端版 APK，可加 --mode standalone|client、--flavor phone|tablet
 ```
+
+群晖 SPK 和威联通 QPKG 是 noarch Docker 套件，不打包 Node.js 或 Prisma 引擎；构建时只生成容器控制脚本、`INFO`/`qpkg.cfg` 和图标。`qnap` 需要 QDK 2.5.3：`/usr/share/QDK/bin` 加入 PATH，`qbuild` 生成自解压 `.qpkg`。
 
 桌面版使用 Electron 45（内置 Node.js 24）和 electron-builder 26，服务端由 Electron 自带的 Node 运行。electron-builder 26 复制 `extraResources` 时总会跳过来源目录根层的 `node_modules`，因此 `packaging/desktop/package.json` 把 `server/node_modules` 单独列为一项；打包后 `build.mjs` 会检查 Prisma Client 等关键文件是否进入安装包。
 
@@ -123,7 +147,7 @@ PDF 导入的浏览器端解析需要 pdfjs-dist 的 CMap 与标准字体数据�
 - 安卓 Prisma 引擎：Prisma 不提供安卓版本，`build-android-prisma-engines.sh` 按项目安装的 Prisma 版本下载对应提交的 prisma-engines 源码，用 Android NDK（`ANDROID_NDK_HOME`）和 rustup 交叉编译查询引擎与迁移引擎，约需 15–30 分钟。输出目录默认 `dist/android-prisma-engines`，可用 `ANDROID_PRISMA_ENGINES_DIR` 指定。
 - `patchelf`（可用 `PATCHELF` 指定路径）和 `zip`。
 
-单机版内置的 Node.js 取自 [Termux](https://termux.dev) 软件源的 `nodejs-lts` 及其依赖库（构建时按软件源索引校验 SHA256，可用 `TERMUX_MIRROR` 指定镜像）。安卓只允许执行 `nativeLibraryDir` 中的程序，因此 Node.js、依赖库和引擎都以 `lib*.so` 的形式放进 `jniLibs/arm64-v8a`，由 `scripts/package/android-runtime.mjs` 改名并用 patchelf 改写依赖；服务端打包为 `assets/server.zip`，首次启动时解压。各组件的许可证随 APK 放在 `assets/licenses/`。网页端按需加载的 HEIC/HEIF 转换组件（heic-to 及其包含的 libheif、libde265）的第三方说明与许可证位于 `public/third-party-licenses/heic-to/`，随服务端 `public/` 目录进入 Docker 镜像、npm 包、桌面版、飞牛OS 安装包和单机版的 `server.zip`。
+单机版内置的 Node.js 取自 [Termux](https://termux.dev) 软件源的 `nodejs`（当前 26.x，依赖 libicu 79；`nodejs-lts` 24.22 仍依赖 libicu 78，与软件源已更新的 libicu 79.1 不兼容）及其依赖库（构建时按软件源索引校验 SHA256，可用 `TERMUX_MIRROR` 指定镜像）。安卓只允许执行 `nativeLibraryDir` 中的程序，因此 Node.js、依赖库和引擎都以 `lib*.so` 的形式放进 `jniLibs/arm64-v8a`，由 `scripts/package/android-runtime.mjs` 改名并用 patchelf 改写依赖；服务端打包为 `assets/server.zip`，首次启动时解压。各组件的许可证随 APK 放在 `assets/licenses/`。网页端按需加载的 HEIC/HEIF 转换组件（heic-to 及其包含的 libheif、libde265）的第三方说明与许可证位于 `public/third-party-licenses/heic-to/`，随服务端 `public/` 目录进入 Docker 镜像、npm 包、桌面版、飞牛OS 安装包和单机版的 `server.zip`。
 
 versionCode 由版本号换算（`scripts/package/android-version.mjs`）：预览版 `2026.10.22-3` 为 `2026102203`，正式版 `2026.10.22` 为 `2026102299`，保证升级时递增。
 

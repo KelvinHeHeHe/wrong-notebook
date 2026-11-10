@@ -6,7 +6,7 @@ After signing in, open "Settings → General" to adjust your own preferences:
 
 | Setting | Default |
 | --- | --- |
-| Review before import | When on, review before saving; useful when every question must be checked |
+| Review before import | On by default: check the recognition result before saving; when off, results are saved directly. Keep it on because AI may misread numbers, symbols and figures |
 | Grade recognition for new questions | Fixed mode by default: use the chosen grade and semester, or the current account grade if unset; AI recognition is also available |
 | SVG animated explanations | On |
 | GeoGebra interactive demos | Off |
@@ -56,7 +56,7 @@ AI features send the question text, images, answers, reference answers and expla
 
 | Role | Main permissions |
 | --- | --- |
-| Regular user | Manage their own questions, practice, exam papers and preferences; import and export their own data |
+| Regular user | Manage their own questions, practice, exam papers and preferences; import and export their own data, and merge another account's backup into the current account |
 | Admin | Global AI and prompt settings, time zone, registration switch, user management and site-wide data import/export |
 
 Admins open the dashboard from "Settings → User Management" to see usage statistics and enable, disable or delete users. Confirm the target and [back up your data](Backup-and-Restore-en) before deleting.

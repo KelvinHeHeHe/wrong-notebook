@@ -46,8 +46,8 @@ async function exportBackup() {
     return response.json();
 }
 
-async function importBackup(body: object) {
-    const response = await IMPORT(new Request('http://localhost/api/import', {
+async function importBackup(body: object, query = '') {
+    const response = await IMPORT(new Request(`http://localhost/api/import${query}`, {
         method: 'POST',
         body: JSON.stringify(body),
         headers: { 'Content-Type': 'application/json' },
@@ -225,7 +225,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(await database.knowledgeTag.count({ where: { name: '我的句式笔记' } })).toBe(1);
     });
 
-    it('导出文件使用第 13 版格式，包含 tagSet 字段、空的新考试集合与 extensions', async () => {
+    it('导出文件使用第 13 版格式，包含 tagSet、试卷 mode、空的新考试集合与 extensions', async () => {
         const backup = await exportBackup();
         expect(backup.version).toBe(13);
         expect(backup.extensions).toEqual({});
@@ -990,7 +990,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         const image = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
         const result = JSON.stringify({ questionText: '备份中的草稿题目', answerText: '答', analysis: '析', knowledgePoints: [], subject: '数学' });
         await database.importTask.createMany({ data: [
-            { userId: 'user-1', mode: 'review', status: 'review', subjectId: 'math', targetSubjectId: 'math', imageData: image, result, timings: '{"server":{"analyze":1200}}', createdAt: new Date('2026-10-01T00:00:00Z') },
+            { userId: 'user-1', mode: 'review', status: 'review', subjectId: 'math', targetSubjectId: 'math', source: '期中试卷', imageData: image, result, timings: '{"server":{"analyze":1200}}', createdAt: new Date('2026-10-01T00:00:00Z') },
             { userId: 'user-1', mode: 'auto', status: 'analyzing', imageData: image, createdAt: new Date('2026-10-02T00:00:00Z') },
             { userId: 'user-1', mode: 'auto', status: 'failed', error: 'AI_TIMEOUT_ERROR', imageData: image, createdAt: new Date('2026-10-03T00:00:00Z') },
             { userId: 'user-1', mode: 'auto', status: 'saved', imageData: '', result, createdAt: new Date('2026-10-04T00:00:00Z') },
@@ -1010,7 +1010,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
             ['failed', 'AI_TIMEOUT_ERROR'],
         ]);
         // 来源标识写入幂等键，用于判断重复导入
-        expect(tasks[0]).toMatchObject({ imageData: image, subjectId: math.id, targetSubjectId: math.id, clientRequestId: expect.any(String) });
+        expect(tasks[0]).toMatchObject({ imageData: image, subjectId: math.id, targetSubjectId: math.id, source: '期中试卷', clientRequestId: expect.any(String) });
         expect(JSON.parse(tasks[0].result!).questionText).toBe('备份中的草稿题目');
 
         // 再次导入同一文件不重复创建
@@ -1251,5 +1251,55 @@ describe('数据导出后再导入（真实 SQLite）', () => {
             // 核心数据回滚到导入前（清空后）的状态
             expect(await database.errorItem.count({ where: { userId: 'user-1' } })).toBe(itemsAfterClear);
         });
+    });
+});
+
+describe('跨账号合并导入', () => {
+    const originalSession = { user: { id: 'user-1', email: 'backup-test@example.com', role: 'user' }, expires: '2099-01-01' };
+
+    /** 创建另一个账号的备份（含该账号的偏好设置和题目） */
+    async function exportOtherAccountBackup() {
+        await database.user.create({
+            data: { id: 'user-2', email: 'parent@example.com', password: 'test-only', confirmBeforeImport: true },
+        });
+        await database.subject.create({
+            data: { id: 'parent-math', name: '家长数学', stage: 'junior_high', subjectKey: 'math', userId: 'user-2' },
+        });
+        await database.errorItem.create({
+            data: { id: 'parent-item', userId: 'user-2', subjectId: 'parent-math', originalImageUrl: '', questionText: '家长录入的题目', answerText: '答案', analysis: '解析' },
+        });
+        mocks.session = { user: { id: 'user-2', email: 'parent@example.com', role: 'user' }, expires: '2099-01-01' };
+        const backup = await exportBackup();
+        mocks.session = originalSession;
+        return backup;
+    }
+
+    it('merge=true 时把其他账号的备份合并到当前账号，且不还原对方偏好', async () => {
+        const backup = await exportOtherAccountBackup();
+        expect(backup.user.email).toBe('parent@example.com');
+        await clearUserData();
+
+        const { stats } = await importBackup(backup, '?merge=true');
+
+        expect(stats.preferencesRestored).toBe(false);
+        expect((await database.user.findUniqueOrThrow({ where: { id: 'user-1' } })).confirmBeforeImport).toBe(true);
+        expect((await database.user.findUniqueOrThrow({ where: { id: 'user-2' } })).confirmBeforeImport).toBe(true);
+        const importedItem = await database.errorItem.findFirstOrThrow({ where: { questionText: '家长录入的题目', userId: 'user-1' } });
+        expect(importedItem.userId).toBe('user-1');
+        const importedNotebook = await database.subject.findUniqueOrThrow({ where: { id: importedItem.subjectId! } });
+        expect(importedNotebook.userId).toBe('user-1');
+    });
+
+    it('未指定 merge=true 时仍拒绝其他账号的备份', async () => {
+        const backup = await exportOtherAccountBackup();
+        await clearUserData();
+        const response = await IMPORT(new Request('http://localhost/api/import', {
+            method: 'POST',
+            body: JSON.stringify(backup),
+            headers: { 'Content-Type': 'application/json' },
+        }));
+
+        expect(response.status).toBe(400);
+        expect(await database.errorItem.count({ where: { userId: 'user-1' } })).toBe(0);
     });
 });

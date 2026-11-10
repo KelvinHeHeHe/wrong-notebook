@@ -14,7 +14,7 @@
 
 ## 网页导出与导入
 
-在设置的数据管理入口导出 JSON，并妥善保存。普通用户导入时，导出文件中的用户邮箱必须与当前账户一致；管理员可以使用管理范围的全部数据导入导出。
+在设置的数据管理入口导出 JSON，并妥善保存。普通用户导入时，导出文件中的用户邮箱通常必须与当前账户一致；备份来自其他账号时，可在确认后合并到当前账号，错题本、标签、题目和试卷全部归当前账号，不还原对方的偏好设置。管理员可以使用管理范围的全部数据导入导出。
 
 ### 导出 JSON（题目交换格式）
 
@@ -31,7 +31,7 @@
 
 错题的配图、GeoGebra 演示、中英文 SVG 动画讲解及其已合成的云端语音（MP3）、最近一次举一反三和掌握概率都会随导出文件还原，SVG 在导入时重新净化；没有掌握概率的题目导入后会重新评估。试卷连同题目和每次录入的结果一起还原；导出时仍在生成的题目导入后显示为失败，可在试卷页重新生成。导入本人的导出文件时，还会还原录入年级识别规则及固定年级、导入前人工校对、判重阈值、GeoGebra 演示、SVG 动画讲解和界面主题等偏好设置。
 
-导出文件为第 11 版，包含尚未处理的识别任务（待校对草稿和失败的任务，含题目图片或题目文字与识别结果）以及未完成的多题批次（分题草稿及你的调整、分题失败的批次、已开始但仍有题未入库的批次）；已保存的任务和全部入库的批次不导出。导入时待校对草稿和分题草稿保持原状，其余任务（含导出时仍在识别或保存的）显示为失败，导出时仍在分题的批次显示为分题失败，需要时手动重试，导入本身不会调用 AI。批次内的任务导入后仍归在原批次中，重复导入同一文件不会重复创建。旧版备份没有这些字段，照常导入。
+导出文件为第 12 版，包含尚未处理的识别任务（待校对草稿和失败的任务，含题目图片或题目文字与识别结果、错题来源）以及未完成的多题批次（分题草稿及你的调整、分题失败的批次、已开始但仍有题未入库的批次）；已保存的任务和全部入库的批次不导出。导入时待校对草稿和分题草稿保持原状，其余任务（含导出时仍在识别或保存的）显示为失败，导出时仍在分题的批次显示为分题失败，需要时手动重试，导入本身不会调用 AI。批次内的任务导入后仍归在原批次中，重复导入同一文件不会重复创建。旧版备份没有这些字段，照常导入。
 
 第 7 版起导出文件新增 `extensions` 命名空间，用于 fork 项目存放私有扩展数据（如题库元数据）。`extensions` 按 `<key>: { version, data }` 组织，每个扩展自行管理版本号；上游默认导出空对象 `{}`，导入时对未注册的 key 安全跳过并记录警告，版本高于当前程序支持的扩展同样跳过。fork 项目可在 `src/lib/backup-extensions.ts` 的 `BACKUP_EXTENSIONS` 数组中注册扩展。
 
@@ -69,6 +69,109 @@ tar -tzf "$backup_file"
 备份失败时不要继续升级，先处理失败原因并确认服务恢复。使用内置 HTTPS 时，把 `certs/` 也加入归档；有额外部署文件时一并保存。
 
 备份中可能含题目原图、用户资料、密码哈希和 AI 凭据，应限制访问并保存在独立位置。检查归档能够读取，并在隔离环境中验证恢复流程。
+
+## Unraid 整站备份与恢复
+
+Unraid 的容器数据在 `/mnt/user/appdata/wrong-notebook`（`data/` 与 `config/`）。容器环境变量（`NEXTAUTH_SECRET`、`NEXTAUTH_URL`）保存在 Unraid 的容器配置中，不在 appdata 目录内，迁移或重建容器时需要另行记录。
+容器名不是 `wrong-notebook` 时，把下面命令中的名称替换为实际容器名。
+
+停止容器后归档，可保证 SQLite 数据文件、WAL/SHM 辅助文件与配置一致：
+
+```bash
+appdata=/mnt/user/appdata/wrong-notebook
+backups=/mnt/user/backups/wrong-notebook
+mkdir -p "$backups"
+docker stop wrong-notebook
+backup_file="$backups/wrong-notebook-$(date +%Y%m%d-%H%M%S).tar.gz"
+tar -czf "$backup_file" -C /mnt/user/appdata wrong-notebook
+docker start wrong-notebook
+tar -tzf "$backup_file"
+```
+
+使用内置 HTTPS 或额外挂载了证书目录时，把对应目录也加入归档。也可以使用 Unraid 的 **Appdata Backup** 插件：把 `/mnt/user/appdata/wrong-notebook` 加入备份范围，插件会先停止容器再归档；恢复时用插件还原，或按下面的手动步骤操作。
+
+备份失败时不要继续升级，先处理失败原因并确认容器恢复运行。归档中可能含题目原图、用户资料、密码哈希和 AI 凭据，应限制访问并保存在独立位置。
+
+恢复步骤：
+
+1. 确认备份时间、来源版本与归档内容，并记录当前容器的 Repository 标签、端口、路径映射和全部环境变量。
+2. 在 Docker 页停止容器。
+3. 把当前 `/mnt/user/appdata/wrong-notebook` 移到备份位置，再把归档解压到 `/mnt/user/appdata`：
+
+   ```bash
+   tar -xzf "$backups/wrong-notebook-YYYYMMDD-HHMMSS.tar.gz" -C /mnt/user/appdata
+   ```
+
+4. 保持原容器的路径映射与 `NEXTAUTH_SECRET`，优先使用与备份匹配的镜像版本；启动后在浏览器登录，核对用户、错题、标签、作答历史和试卷。
+5. 需要升级时，在恢复验证完成后单独执行[升级流程](Deployment#unraid-docker-界面)。
+
+不要把旧数据库直接交给不兼容的新旧版本反复切换。恢复后的容器与备份版本不匹配时，先确认数据可用，再按升级步骤切换镜像。
+
+## 群晖 Container Manager 整站备份与恢复
+
+数据目录为 `/volume1/docker/wrong-notebook`（`data/` 与 `config/`）；容器环境变量保存在 Container Manager 的容器配置中，迁移或重建容器时需另行记录。容器名不是 `wrong-notebook` 时，命令中的名称相应替换。
+
+停止容器后归档：
+
+```bash
+appdata=/volume1/docker/wrong-notebook
+backups=/volume1/backups/wrong-notebook
+mkdir -p "$backups"
+docker stop wrong-notebook
+backup_file="$backups/wrong-notebook-$(date +%Y%m%d-%H%M%S).tar.gz"
+tar -czf "$backup_file" -C /volume1/docker wrong-notebook
+docker start wrong-notebook
+tar -tzf "$backup_file"
+```
+
+也可以使用 DSM 的 **Hyper Backup**：把 `/volume1/docker/wrong-notebook` 加入备份任务，任务执行前先停止容器；恢复时用 Hyper Backup 还原，或按下面的手动步骤操作。归档可能含题目原图、用户资料、密码哈希和 AI 凭据，应限制访问并保存在独立位置。
+
+恢复：
+
+1. 记录当前容器的映像标签、端口、卷映射和全部环境变量。
+2. 在 Container Manager 中停止容器。
+3. 把当前 `/volume1/docker/wrong-notebook` 移到备份位置，把归档解压到 `/volume1/docker`：
+
+   ```bash
+   tar -xzf "$backups/wrong-notebook-YYYYMMDD-HHMMSS.tar.gz" -C /volume1/docker
+   ```
+
+4. 保持原容器的卷映射与 `NEXTAUTH_SECRET`，优先使用与备份匹配的映像版本；启动后登录核对用户、错题、标签、作答历史和试卷。
+5. 需要升级时，在恢复验证完成后单独执行[升级流程](Deployment#群晖-dsmcontainer-manager)。
+
+## 威联通 Container Station 整站备份与恢复
+
+数据目录为 `/share/Container/wrong-notebook`（`data/` 与 `config/`）；容器环境变量保存在 Container Station 的容器配置中，迁移或重建容器时需另行记录。容器名不是 `wrong-notebook` 时，命令中的名称相应替换。
+
+停止容器后归档：
+
+```bash
+appdata=/share/Container/wrong-notebook
+backups=/share/Backups/wrong-notebook
+mkdir -p "$backups"
+docker stop wrong-notebook
+backup_file="$backups/wrong-notebook-$(date +%Y%m%d-%H%M%S).tar.gz"
+tar -czf "$backup_file" -C /share/Container wrong-notebook
+docker start wrong-notebook
+tar -tzf "$backup_file"
+```
+
+也可以使用 QNAP 的 **Hybrid Backup Sync**：把 `/share/Container/wrong-notebook` 加入备份任务，任务执行前先停止容器；恢复时用 Hybrid Backup Sync 还原，或按下面的手动步骤操作。归档可能含题目原图、用户资料、密码哈希和 AI 凭据，应限制访问并保存在独立位置。
+
+恢复：
+
+1. 记录当前容器的映像标签、端口、卷映射和全部环境变量。
+2. 在 Container Station 中停止容器。
+3. 把当前 `/share/Container/wrong-notebook` 移到备份位置，把归档解压到 `/share/Container`：
+
+   ```bash
+   tar -xzf "$backups/wrong-notebook-YYYYMMDD-HHMMSS.tar.gz" -C /share/Container
+   ```
+
+4. 保持原容器的卷映射与 `NEXTAUTH_SECRET`，优先使用与备份匹配的映像版本；启动后登录核对用户、错题、标签、作答历史和试卷。
+5. 需要升级时，在恢复验证完成后单独执行[升级流程](Deployment#威联通-qtscontainer-station)。
+
+
 
 ## 恢复整站
 

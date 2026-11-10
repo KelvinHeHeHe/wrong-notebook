@@ -21,7 +21,7 @@ export async function createErrorItemInTransaction(
     context: { gradeSemester: string | null; resolvedPaperLevel: string | null; extraErrorItemData?: Partial<Prisma.ErrorItemUncheckedCreateInput> },
 ): Promise<SavedQuestionItem> {
     const { questionText, answerText, analysis, wrongAnswerText, mistakeAnalysis, mistakeStatus,
-        knowledgePoints, originalImageUrl, subjectId: requestedSubjectId, subjectName, difficultyStars, geogebraCommands } = body;
+        knowledgePoints, originalImageUrl, subjectId: requestedSubjectId, subjectName, difficultyStars, geogebraCommands, source } = body;
     const questionType = normalizeQuestionType(body.questionType);
     const figureSvg = sanitizeFigureSvg(body.figureSvg);
     const hasFigure = !!body.hasFigure || figureSvg !== null;
@@ -82,6 +82,7 @@ export async function createErrorItemInTransaction(
                 figureAlign: body.figureAlign,
                 geogebraCommands: geogebraCommands || null,
                 questionType,
+                source: source?.trim() || null,
                 masteryLevel: 0,
                 ...context.extraErrorItemData,
                 tags: {

@@ -188,6 +188,7 @@ describe('发送条件', () => {
     it('instance_alive 每天只写一条', async () => {
         const fetchMock = okFetch();
         await flushOutbox({ now: NOW, fetchImpl: fetchMock });
+        // 基准固定在 UTC 当日中午，+7h 仍属同一 UTC 日
         await flushOutbox({ now: new Date(NOW.getTime() + 7 * HOUR), force: true, fetchImpl: fetchMock });
         const alive = fetchMock.mock.calls.flatMap((_, i) => sentBody(fetchMock, i).items).filter((item: { name?: string }) => item.name === 'instance_alive');
         expect(alive).toHaveLength(1);
