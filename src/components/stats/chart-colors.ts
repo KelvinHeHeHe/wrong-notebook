@@ -28,6 +28,9 @@ export const COLORS: string[] = [
 export const CHART_ADDED_COLOR = 'var(--chart-1)';
 export const CHART_MASTERED_COLOR = 'var(--success)';
 
+/** 考试趋势：单次考试得分率折线颜色 */
+export const EXAM_TREND_COLOR = 'var(--chart-2)';
+
 
 /** 难度配色（语义固定，深色模式下仍可辨识） */
 export const DIFFICULTY_COLORS: Record<string, string> = {
