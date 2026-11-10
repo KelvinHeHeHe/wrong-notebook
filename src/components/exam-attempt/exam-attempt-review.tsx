@@ -52,10 +52,10 @@ export function ExamAttemptReview({ attemptId }: ExamAttemptReviewProps) {
         <p role="status" aria-live="polite" className="text-sm">{phaseLabel ?? (notice ? text[notice] : '')}</p>
         {questions.map((question) => {
             const answer = answers.find((item) => item.examQuestionId === question.id);
-            return <AttemptAnswerCard key={question.id} question={question} answer={answer} pages={attempt.pages} draft={answer ? drafts[answer.id] ?? answerDraft(answer) : null} disabled={disabled} confirmed={confirmed} onEdit={(field, value) => answer && review.edit(answer.id, field, value)} onSave={() => answer && void review.save(answer.id)} onRegrade={() => answer && void review.regrade(answer.id)} />;
+            return <AttemptAnswerCard key={question.id} question={question} answer={answer} pages={attempt.pages} draft={answer ? drafts[answer.id] ?? answerDraft(answer) : null} disabled={disabled} confirmed={confirmed} hasUnsavedChanges={dirty} onEdit={(field, value) => answer && review.edit(answer.id, field, value)} onSave={() => answer && void review.save(answer.id)} onRegrade={() => answer && void review.regrade(answer.id)} onUnmap={() => answer && void review.unmapCandidate(answer.id)} />;
         })}
         {dirty && <p className="text-sm text-muted-foreground">{text.saveFirst}</p>}
-        <UnmatchedCandidates pages={attempt.pages} answers={answers} questions={questions} disabled={disabled || dirty} onMap={(...args) => void review.mapCandidate(...args)} onRetry={(order) => void review.retryPage(order)} onUnmap={(answerId) => void review.unmapCandidate(answerId)} />
+        <UnmatchedCandidates pages={attempt.pages} answers={answers} questions={questions} disabled={disabled || dirty} onMap={(...args) => void review.mapCandidate(...args)} onRetry={(order) => void review.retryPage(order)} />
         {!confirmed && <section id="attempt-confirm-issues" aria-label={text.preflight} className="space-y-2 text-sm">
             {(issues.length > 0 || invalidStatus || !questions.length) && <h2 className="font-semibold">{text.preflight}</h2>}
             {invalidStatus && <p>{text.invalidStatus}</p>}{!questions.length && <p>{text.noQuestions}</p>}

@@ -1834,6 +1834,7 @@ export const zh = {
                 target: "目标题目",
                 chooseTarget: "请选择目标题目",
                 map: "映射到此题",
+                linkedCandidate: "已关联候选：第 {number} 题，来源第 {page} 页",
                 mappedTarget: "当前关联：第 {number} 题",
                 unmap: "解除关联",
                 unmapping: "正在解除关联…",

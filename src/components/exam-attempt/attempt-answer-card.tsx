@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { parseAttemptRegionJson } from '@/lib/exam/exam-attempt';
 import { draftChanges, validAwardedScore, validDraft } from '@/lib/exam/exam-attempt-review-client';
 import { normalizeExamScore } from '@/lib/exam/exam-score';
 import { en } from '@/lib/i18n/en';
@@ -21,12 +22,14 @@ interface AttemptAnswerCardProps {
     draft: ExamAnswerDraft | null;
     disabled: boolean;
     confirmed: boolean;
+    hasUnsavedChanges: boolean;
     onEdit: (field: keyof ExamAnswerDraft, value: string) => void;
     onSave: () => void;
     onRegrade: () => void;
+    onUnmap: () => void;
 }
 
-export function AttemptAnswerCard({ question, answer, pages, draft, disabled, confirmed, onEdit, onSave, onRegrade }: AttemptAnswerCardProps) {
+export function AttemptAnswerCard({ question, answer, pages, draft, disabled, confirmed, hasUnsavedChanges, onEdit, onSave, onRegrade, onUnmap }: AttemptAnswerCardProps) {
     const { t } = useLanguage();
     const text = (t.examAttempt ?? en.examAttempt).review ?? en.examAttempt.review;
     const id = useId();
@@ -34,6 +37,7 @@ export function AttemptAnswerCard({ question, answer, pages, draft, disabled, co
     const maxValid = changes && normalizeExamScore(changes.maxScore) !== null;
     const scoreValid = changes && validAwardedScore(changes.awardedScore ?? null, changes.maxScore ?? null);
     const status = answer?.reviewStatus;
+    const linkedCandidate = parseAttemptRegionJson(answer?.regionJson);
     return <article aria-labelledby={`${id}-title`} className={`min-w-0 space-y-4 rounded-xl border p-4 ${status === 'required' ? 'border-amber-500' : ''}`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 id={`${id}-title`} className="font-semibold">{text.question.replace('{number}', String(question.displayNumber))}</h2>
@@ -43,6 +47,10 @@ export function AttemptAnswerCard({ question, answer, pages, draft, disabled, co
         <p className="whitespace-pre-wrap break-words text-sm"><strong>{text.answerKey}：</strong>{question.answerText ?? '—'}</p>
         {!answer || !draft ? <p role="status">{text.missingAnswer}</p> : <>
             <p className="text-xs text-muted-foreground">{text.confidence}：{answer.confidence === null ? '—' : `${Math.round(answer.confidence * 100)}%`}</p>
+            {linkedCandidate?.candidateId && <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
+                <p id={`${id}-candidate-source`} className="text-sm">{text.linkedCandidate.replace('{number}', String(question.displayNumber)).replace('{page}', String(linkedCandidate.pageOrder))}</p>
+                <Button type="button" variant="outline" disabled={disabled || confirmed || hasUnsavedChanges} aria-describedby={`${id}-candidate-source`} onClick={onUnmap}>{text.unmap}</Button>
+            </div>}
             <AttemptRegionPreview pages={pages} regionJson={answer.regionJson} />
             <fieldset disabled={disabled || confirmed} className="min-w-0 space-y-4">
                 <div className="space-y-1"><label htmlFor={`${id}-answer`}>{text.recognizedAnswer}</label><Textarea id={`${id}-answer`} maxLength={20000} value={draft.recognizedAnswer} onChange={(event) => onEdit('recognizedAnswer', event.target.value)} /></div>

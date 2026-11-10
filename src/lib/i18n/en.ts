@@ -1835,6 +1835,7 @@ export const en = {
                 target: "Target question",
                 chooseTarget: "Choose a target question",
                 map: "Map to this question",
+                linkedCandidate: "Linked candidate: Question {number}, source page {page}",
                 mappedTarget: "Currently linked: Question {number}",
                 unmap: "Unlink candidate",
                 unmapping: "Unlinking candidate…",

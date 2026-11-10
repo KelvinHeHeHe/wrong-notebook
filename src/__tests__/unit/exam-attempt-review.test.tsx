@@ -8,7 +8,7 @@ import { AttemptRegionPreview } from '@/components/exam-attempt/attempt-region-p
 import * as languageContext from '@/contexts/LanguageContext';
 import { translations } from '@/lib/translations';
 import type { Translations } from '@/lib/translations';
-import type { ExamAttemptAnswerDetail, ExamQuestionDetail } from '@/types/api';
+import type { ExamAttemptAnswerDetail, ExamAttemptPageDetail, ExamQuestionDetail } from '@/types/api';
 import ExamAttemptReviewPage from '@/app/exam-attempts/[id]/page';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 import { ApiError, apiClient } from '@/lib/api-client';
@@ -22,7 +22,7 @@ vi.mock('@/components/background-tasks-button', () => ({ BackgroundTasksButton: 
 vi.mock('@/lib/image-pipeline', () => ({ renderRegion: vi.fn() }));
 const region = JSON.stringify({ pageOrder: 2, candidateId: 'used', regions: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.4 }] });
 const candidate = { candidateId: 'free', sourceShortId: null, displayNumber: 99, recognizedAnswer: '候选正文', notAttempted: false, confidence: 0.5, regions: [] };
-const pages = [1, 2].map((order) => ({ id: `pg${order}`, attemptId: 'a1', order, imageData: `data:image/jpeg;base64,YQ==${order}`, mimeType: 'image/jpeg', width: 1000, height: 1400, checksum: `sum${order}`, recognitionResult: JSON.stringify({ version: 1, status: order === 1 ? 'failed' : 'succeeded', candidates: order === 1 ? [] : [candidate, { ...candidate, candidateId: 'used' }], errorCode: order === 1 ? 'TIMEOUT' : null, completedAt: '2026-11-09T00:00:00Z' }), createdAt: '2026-11-09T00:00:00Z', updatedAt: '2026-11-09T00:00:00Z' }));
+const pages: ExamAttemptPageDetail[] = [1, 2].map((order) => ({ id: `pg${order}`, attemptId: 'a1', order, imageData: `data:image/jpeg;base64,YQ==${order}`, mimeType: 'image/jpeg', width: 1000, height: 1400, checksum: `sum${order}`, recognitionResult: JSON.stringify({ version: 1, status: order === 1 ? 'failed' : 'succeeded', candidates: order === 1 ? [] : [candidate, { ...candidate, candidateId: 'used' }], errorCode: order === 1 ? 'TIMEOUT' : null, completedAt: '2026-11-09T00:00:00Z' }), createdAt: '2026-11-09T00:00:00Z', updatedAt: '2026-11-09T00:00:00Z' }));
 const answer: ExamAttemptAnswerDetail = { id: 'ans1', attemptId: 'a1', examQuestionId: 'q1', recognizedAnswer: '原答案', result: 'wrong', awardedScore: 0, maxScore: 5, gradingSource: 'ai', gradingReason: '判分理由', confidence: 0.5, reviewStatus: 'required', regionJson: region, createdAt: '2026-11-09T00:00:00Z', updatedAt: '2026-11-09T00:00:00Z' };
 const question: ExamQuestionDetail = { id: 'q1', order: 1, errorItemId: null, sourceShortId: 'S1', status: 'ready', questionText: '第一题题干', answerText: '标准答案', analysis: null, score: 5, error: null, notebookName: null, attempts: [] };
 function detail() { return { id: 'a1', userId: 'u1', paperId: 'p1', status: 'review', updatedAt: 'v1', takenAt: '2026-11-09T00:00:00Z', comment: null, totalScore: null, maxScore: null, confirmedAt: null, createdAt: '2026-11-09T00:00:00Z', paper: { id: 'p1', title: '测试卷', status: 'ready', origin: 'imported' }, pages, answers: [{ ...answer }] }; }
@@ -252,6 +252,50 @@ describe('纸质作答复核', () => {
         await click('解除关联'); expect(container.querySelector('[role=alert]')?.textContent).toContain('已刷新'); expect(apiClient.patch).toHaveBeenCalledTimes(1);
         vi.mocked(apiClient.patch).mockRejectedValueOnce(new ApiError(400, 'Bad Request', { message: 'EXAM_ATTEMPT_CANDIDATE_NOT_MAPPED', code: 'VALIDATION_ERROR' })); latest.answers[0].regionJson = null;
         await click('解除关联'); expect(container.querySelector('[role=alert]')?.textContent).toContain('该题已无候选关联'); expect(vi.mocked(apiClient.patch).mock.calls[1][1]).toEqual({ candidateRef: null, expectedUpdatedAt: 'fresh-unlink' });
+    });
+    it.each(['changed', 'empty'])('人工保存后重试候选 %s，逐题卡仍能解除并映射新候选', async (mode) => {
+        await render(); await edit('得分', '2.5'); await click('保存并标记已复核');
+        let version = 2;
+        let retryCount = 0;
+        vi.mocked(apiClient.post).mockImplementation(async () => {
+            const candidates = retryCount++ === 0 && mode === 'empty' ? [] : [{ ...candidate, candidateId: 'new-confidence', confidence: 0.6 }];
+            latest = { ...latest, updatedAt: `v${++version}`, pages: latest.pages.map((page) => page.order === 2 ? { ...page, recognitionResult: JSON.stringify({ version: 1, status: 'succeeded', candidates, errorCode: null, completedAt: '2026-11-10T00:00:00Z' }) } : page) };
+            return { status: 'review', updatedAt: latest.updatedAt, successes: [{ pageOrder: 2, candidateCount: candidates.length, matchedCount: 0 }], failures: [] };
+        });
+        vi.mocked(apiClient.patch).mockImplementation(async (_url, body) => {
+            const { candidateRef } = body as { candidateRef: { pageOrder: number; candidateId: string } | null };
+            latest = { ...latest, updatedAt: `v${++version}`, answers: [{ ...latest.answers[0], recognizedAnswer: candidateRef === null ? null : '候选正文', regionJson: candidateRef === null ? null : JSON.stringify({ ...candidateRef, regions: [] }), result: null, awardedScore: null, gradingReason: null, gradingSource: null, reviewStatus: 'required' }] };
+            return { answer: latest.answers[0], updatedAt: latest.updatedAt };
+        });
+        await click('重试第 2 页');
+        expect(field('得分').value).toBe('2.5'); expect(container.textContent).toContain('已人工复核');
+        const card = container.querySelector('article')!;
+        const unmap = [...card.querySelectorAll('button')].find((element) => element.textContent === '解除关联');
+        expect(unmap).toBeDefined(); expect(card.textContent).toContain('已关联候选：第 1 题，来源第 2 页');
+        await act(async () => unmap!.click());
+        expect(vi.mocked(apiClient.patch).mock.calls[1][1]).toEqual({ candidateRef: null, expectedUpdatedAt: 'v3' });
+        expect(card.textContent).toContain('必须人工复核'); expect(field('识别答案').value).toBe(''); expect(field('结果').value).toBe(''); expect(field('得分').value).toBe(''); expect(button('确认成绩').disabled).toBe(true);
+        expect([...card.querySelectorAll('button')].some((element) => element.textContent === '解除关联')).toBe(false);
+        if (mode === 'empty') await click('重试第 2 页');
+        await edit('目标题目', 'ans1'); await click('映射到此题');
+        expect(vi.mocked(apiClient.patch).mock.calls[2][1]).toEqual({ candidateRef: { pageOrder: 2, candidateId: 'new-confidence' }, expectedUpdatedAt: mode === 'empty' ? 'v5' : 'v4' });
+        expect(field('识别答案').value).toBe('候选正文'); expect(card.textContent).toContain('必须人工复核');
+    });
+    it.each(['dirty', 'confirmed', 'busy', 'stale'])('候选已不在信封时，逐题卡解除在 %s 状态禁用', async (mode) => {
+        latest.pages = latest.pages.map((page) => ({ ...page, recognitionResult: null }));
+        if (mode === 'confirmed') latest.status = 'confirmed';
+        await render();
+        let finish: ((value: unknown) => void) | undefined;
+        if (mode === 'dirty') await edit('得分', '2.5');
+        if (mode === 'busy') { vi.mocked(apiClient.patch).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; })); await click('保存并标记已复核'); }
+        if (mode === 'stale') { vi.mocked(apiClient.patch).mockRejectedValueOnce(new ApiError(409, 'Conflict', {})); vi.mocked(apiClient.get).mockRejectedValueOnce(new Error('offline')); await click('保存并标记已复核'); }
+        const unmap = [...container.querySelector('article')!.querySelectorAll('button')].find((element) => element.textContent === '解除关联');
+        expect(unmap).toBeDefined(); expect(unmap!.disabled).toBe(true);
+        if (finish) await act(async () => finish!({ answer, updatedAt: 'v2' }));
+    });
+    it.each([null, JSON.stringify({ pageOrder: 2, candidateId: null, regions: [] })])('答案没有候选引用 %s 时，逐题卡不显示解除入口', async (regionJson) => {
+        latest.answers[0].regionJson = regionJson; await render();
+        expect([...container.querySelector('article')!.querySelectorAll('button')].some((element) => element.textContent === '解除关联')).toBe(false);
     });
     it('切换作答后迟到写入不污染新作答或导航', async () => {
         latest.answers[0].reviewStatus = 'pending'; let finish!: (value: unknown) => void;

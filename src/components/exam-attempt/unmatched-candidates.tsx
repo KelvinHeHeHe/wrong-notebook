@@ -18,14 +18,13 @@ interface UnmatchedCandidatesProps {
     disabled: boolean;
     onMap: (answerId: string, pageOrder: number, candidateId: string) => void;
     onRetry: (pageOrder: number) => void;
-    onUnmap: (answerId: string) => void;
 }
-interface CandidateRowProps extends Pick<UnmatchedCandidatesProps, 'questions' | 'answers' | 'disabled' | 'onMap' | 'onUnmap'> {
+interface CandidateRowProps extends Pick<UnmatchedCandidatesProps, 'questions' | 'answers' | 'disabled' | 'onMap'> {
     page: ExamAttemptPageDetail;
     candidate: ExamAttemptAnswerCandidate;
     linked: Array<{ answerId: string; displayNumber: number }>;
 }
-function CandidateRow({ page, candidate, questions, answers, disabled, linked, onMap, onUnmap }: CandidateRowProps) {
+function CandidateRow({ page, candidate, questions, answers, disabled, linked, onMap }: CandidateRowProps) {
     const { t } = useLanguage();
     const text = (t.examAttempt ?? en.examAttempt).review ?? en.examAttempt.review;
     const id = useId();
@@ -40,14 +39,11 @@ function CandidateRow({ page, candidate, questions, answers, disabled, linked, o
             {questions.map((question) => { const answer = answers.find((item) => item.examQuestionId === question.id); return <option key={question.id} value={answer?.id ?? ''} disabled={!answer}>{text.question.replace('{number}', String(question.displayNumber))}</option>; })}
         </select>
         <Button type="button" variant="outline" disabled={disabled || used || !target} onClick={() => onMap(target, page.order, candidate.candidateId)}>{used ? text.mapped : text.map}</Button>
-        {linked.map((link) => <div key={link.answerId} className="flex flex-wrap items-center justify-between gap-2">
-            <p id={`${id}-${link.answerId}`} className="text-sm">{text.mappedTarget.replace('{number}', String(link.displayNumber))}</p>
-            <Button type="button" variant="outline" disabled={disabled} aria-describedby={`${id}-${link.answerId}`} onClick={() => onUnmap(link.answerId)}>{text.unmap}</Button>
-        </div>)}
+        {linked.map((link) => <p key={link.answerId} className="text-sm">{text.mappedTarget.replace('{number}', String(link.displayNumber))}</p>)}
     </li>;
 }
 
-export function UnmatchedCandidates({ pages, answers, questions, disabled, onMap, onRetry, onUnmap }: UnmatchedCandidatesProps) {
+export function UnmatchedCandidates({ pages, answers, questions, disabled, onMap, onRetry }: UnmatchedCandidatesProps) {
     const { t } = useLanguage();
     const text = (t.examAttempt ?? en.examAttempt).review ?? en.examAttempt.review;
     const links = answers.flatMap((answer) => {
@@ -65,7 +61,7 @@ export function UnmatchedCandidates({ pages, answers, questions, disabled, onMap
                     <Button type="button" variant="outline" disabled={disabled} onClick={() => onRetry(page.order)}>{text.retryPage.replace('{number}', String(page.order))}</Button>
                 </div>
                 <p className="text-sm text-muted-foreground">{recognition?.status === 'failed' ? text.pageFailed : recognition?.status === 'succeeded' ? text.pageSucceeded : text.pagePending}</p>
-                {recognition?.candidates.length ? <ul className="grid gap-3 sm:grid-cols-2">{recognition.candidates.map((candidate, index) => <CandidateRow key={`${candidate.candidateId}:${index}`} page={page} candidate={candidate} questions={questions} answers={answers} disabled={disabled} linked={links.filter((link) => link.key === `${page.order}:${candidate.candidateId}`)} onMap={onMap} onUnmap={onUnmap} />)}</ul> : <p className="text-sm">{text.noCandidates}</p>}
+                {recognition?.candidates.length ? <ul className="grid gap-3 sm:grid-cols-2">{recognition.candidates.map((candidate, index) => <CandidateRow key={`${candidate.candidateId}:${index}`} page={page} candidate={candidate} questions={questions} answers={answers} disabled={disabled} linked={links.filter((link) => link.key === `${page.order}:${candidate.candidateId}`)} onMap={onMap} />)}</ul> : <p className="text-sm">{text.noCandidates}</p>}
             </section>;
         })}
     </section>;
