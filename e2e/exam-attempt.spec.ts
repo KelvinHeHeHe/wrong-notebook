@@ -119,6 +119,24 @@ for (const mobile of [false, true]) {
         expect(await scenario.db.errorItem.count({ where: { userId: scenario.user.id } })).toBe(4);
         expect((await scenario.model()).calls).toHaveLength(callsBefore);
 
+        // 首次确认后立即进入成绩趋势；图表下方普通链接必须能回到既有作答详情。
+        await page.goto('/stats?tab=exams');
+        await expect(page.getByRole('tab', { name: '考试趋势', exact: true })).toHaveAttribute('aria-selected', 'true');
+        await expect(page.getByText('合成纸质作答验收卷', { exact: true })).toBeVisible();
+        await expect(page.getByText('17 / 50', { exact: true })).toBeVisible();
+        const firstAttemptLink = page.locator(`a[href="/exam-attempts/${attemptId}"]`);
+        await expect(firstAttemptLink.getByText('34%', { exact: true })).toBeVisible();
+        if (mobile) {
+            await expect.poll(async () => page.getByRole('tablist').evaluate((element) => (
+                window.getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length
+            ))).toBe(2);
+        }
+        await firstAttemptLink.click();
+        await expect(page).toHaveURL(`/exam-attempts/${attemptId}`);
+        await expect(page.getByText('成绩已确认', { exact: true })).toBeVisible();
+        await page.goBack();
+        await expect(page).toHaveURL(/\/stats\?tab=exams/);
+
         // 备份夹具：同一张试卷、同一作答日期仍是第二次独立作答。
         const secondAttempt = await scenario.db.examAttempt.create({ data: {
             userId: scenario.user.id, paperId: paper.id, takenAt: confirmed.takenAt, status: 'confirmed', comment: '同日第二份作答', totalScore: 50, maxScore: 50, confirmedAt: new Date(),
@@ -126,6 +144,17 @@ for (const mobile of [false, true]) {
             answers: { create: confirmed.answers.map((answer) => ({ examQuestionId: answer.examQuestionId, recognizedAnswer: '同日第二份答案', result: 'correct', awardedScore: 10, maxScore: 10, gradingSource: 'manual', reviewStatus: 'reviewed' })) },
         } });
         for (const question of questions) await scenario.db.practiceRecord.create({ data: { userId: scenario.user.id, examAttemptId: secondAttempt.id, examQuestionId: question.id, errorItemId: question.errorItemId, source: 'exam', result: 'correct', isCorrect: true, questionText: question.questionText, wrongAnswerText: '同日第二份答案' } });
+
+        // 同日第二份作答保留为独立趋势点，摘要使用两次得分率而不是合并或覆盖。
+        await page.goto('/stats?tab=exams');
+        const summaryCard = (title: string) => page.getByText(title, { exact: true }).locator('xpath=../..');
+        await expect(summaryCard('考试次数').getByText('2', { exact: true })).toBeVisible();
+        await expect(summaryCard('平均得分率').getByText('67%', { exact: true })).toBeVisible();
+        await expect(summaryCard('最近一次').getByText('100%', { exact: true })).toBeVisible();
+        await expect(summaryCard('较上一次').getByText('+66.0 个百分点', { exact: true })).toBeVisible();
+        await expect(page.getByRole('link', { name: '查看 合成纸质作答验收卷 的作答详情', exact: true })).toHaveCount(2);
+        await expect(page.getByText('17 / 50', { exact: true })).toBeVisible();
+        await expect(page.getByText('50 / 50', { exact: true })).toBeVisible();
 
         await page.goto('/');
         const settings = await openSettings(page, '危险');

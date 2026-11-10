@@ -327,6 +327,7 @@ Linux CI 使用 `npx playwright install --with-deps chromium` 安装浏览器和
 4. 确认前比较完整 ErrorItem 快照（含掌握度）、PracticeRecord 数和 mastery 调用数，证明没有学习数据副作用；必须人工复核完成才能确认。
 5. 确认时服务端按逐题分数重算总分；每题一条 exam PracticeRecord，外部错误题创建错题、未作答重复题复用并回写关联、正确外部题不创建错题。重复确认后计数和模型调用数不增。
 6. 从设置真实下载 v13 备份，在同邮箱空账号中经 UI 恢复。比较照片和页 recognitionResult（包括未匹配候选）、逐题答案/区域/分数、试卷/错题/练习记录重映射关联，再打开恢复的确认页。
+7. 首次确认后在桌面与手机视口进入“统计中心 → 考试趋势”，核对 17/50 与 34% 并通过逐次列表返回“成绩已确认”的作答详情；再创建同卷、同一 takenAt 的 50/50 作答，验证考试次数为 2、平均得分率为 67%、最近一次为 100%、变化为 +66.0 个百分点且两条详情链接均保留。手机额外验证四个统计标签采用两列布局。整个场景继续只访问隔离应用、SQLite 和本地 Mock AI，不新增外网请求。
 
 Mock 通过专用 `exam-answer-extraction` 操作匹配稳定协议标记；`extractionFailOnCall` 只影响第 N 次提取，不消耗判分或 mastery 调用。固定响应序列在每个独立场景重置，不依赖时钟或外部网络。`src/__tests__/unit/e2e-mock-ai.test.ts` 通过真实 OpenAI SDK 和 BaseAIProvider 验证提取协议、部分失败与重试。评测 CLI 的独立测试仅用合成图检查输入校验、两项指标、指定输出和退出码，真实样本的 ≥60 题及 95% 推荐目标见 [人工评测指南](EXAM_ANSWER_EVALUATION.md)。所有照片、识别候选及作答本地保存并包含在备份 v13 中。
 

@@ -2,20 +2,22 @@
 
 import { Suspense } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Activity, ClipboardCheck, Tags, TrendingUp } from "lucide-react";
+
+import { ActivityHeatmap } from "@/components/stats/activity-heatmap";
+import { ExamTrends } from "@/components/stats/exam-trends";
+import { PracticeStats } from "@/components/stats/practice-stats";
+import { RepeatedMistakesCard } from "@/components/stats/repeated-mistakes-card";
+import { StatsFilterBar } from "@/components/stats/stats-filter-bar";
+import { WrongAnswerStats } from "@/components/stats/wrong-answer-stats";
+import { TagManagement } from "@/components/tags/tag-management";
+import { PageHeader } from "@/components/ui/page-header";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { usePageTitle } from "@/lib/page-title";
-import { WrongAnswerStats } from "@/components/stats/wrong-answer-stats";
-import { PracticeStats } from "@/components/stats/practice-stats";
-import { ActivityHeatmap } from "@/components/stats/activity-heatmap";
-import { RepeatedMistakesCard } from "@/components/stats/repeated-mistakes-card";
-import { TagManagement } from "@/components/tags/tag-management";
-import { StatsFilterBar } from "@/components/stats/stats-filter-bar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { PageHeader } from "@/components/ui/page-header";
-import { TrendingUp, Activity, Tags } from "lucide-react";
 import { parseStatsRange } from "@/lib/stats/stats-range-core";
 
-const STATS_TABS = ["wrong", "practice", "tags"] as const;
+const STATS_TABS = ["wrong", "practice", "exams", "tags"] as const;
 type StatsTab = typeof STATS_TABS[number];
 
 function isStatsTab(value: string | null): value is StatsTab {
@@ -41,12 +43,13 @@ function StatsTabs() {
         router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
     };
 
-    const range = parseStatsRange(searchParams.get("range"));
+    const defaultRange = tab === 'exams' ? '90d' : '30d';
+    const range = parseStatsRange(searchParams.get("range"), defaultRange);
     const subjectParam = searchParams.get("subject") ?? "";
 
     const buildUrl = (base: string) => {
         const params = new URLSearchParams();
-        if (range !== '30d') params.set("range", range);
+        if (range !== defaultRange) params.set("range", range);
         if (subjectParam) params.set("subjectId", subjectParam);
         const qs = params.toString();
         return qs ? `${base}?${qs}` : base;
@@ -54,7 +57,7 @@ function StatsTabs() {
 
     return (
         <Tabs value={tab} onValueChange={handleTabChange} className="w-full">
-            <TabsList className="mb-4 grid h-auto w-full grid-cols-3 gap-1 sm:inline-flex sm:h-10 sm:w-auto">
+            <TabsList className="mb-4 grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:h-10 sm:w-auto">
                 <TabsTrigger value="wrong" className="flex items-center justify-center gap-1.5 whitespace-normal text-center leading-tight sm:gap-2 sm:whitespace-nowrap">
                     <Activity className="h-4 w-4 shrink-0" />
                     {t.wrongAnswerStats?.title || "Wrong Answer Stats"}
@@ -63,13 +66,17 @@ function StatsTabs() {
                     <TrendingUp className="h-4 w-4 shrink-0" />
                     {t.stats?.title || "Practice Stats"}
                 </TabsTrigger>
+                <TabsTrigger value="exams" className="flex items-center justify-center gap-1.5 whitespace-normal text-center leading-tight sm:gap-2 sm:whitespace-nowrap">
+                    <ClipboardCheck className="h-4 w-4 shrink-0" />
+                    {t.stats?.examTrends?.tabTitle || "Exam Trends"}
+                </TabsTrigger>
                 <TabsTrigger value="tags" className="flex items-center justify-center gap-1.5 whitespace-normal text-center leading-tight sm:gap-2 sm:whitespace-nowrap">
                     <Tags className="h-4 w-4 shrink-0" />
                     {t.stats?.tagManagement || "Knowledge Points"}
                 </TabsTrigger>
             </TabsList>
 
-            {tab !== "tags" && <StatsFilterBar />}
+            {tab !== "tags" && <StatsFilterBar defaultRange={defaultRange} />}
 
             <TabsContent value="wrong" className="space-y-4">
                 <WrongAnswerStats
@@ -84,6 +91,9 @@ function StatsTabs() {
                 <PracticeStats url={buildUrl("/api/stats/practice")} />
                 {/* 反复错题目榜：练习统计为空时也照常显示 */}
                 <RepeatedMistakesCard url={buildUrl("/api/stats/repeated-mistakes")} />
+            </TabsContent>
+            <TabsContent value="exams" className="space-y-4">
+                <ExamTrends url={buildUrl("/api/stats/exams")} />
             </TabsContent>
             <TabsContent value="tags" className="space-y-4">
                 <TagManagement />
