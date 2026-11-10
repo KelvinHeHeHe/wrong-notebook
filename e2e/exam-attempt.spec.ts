@@ -40,6 +40,18 @@ for (const mobile of [false, true]) {
         const card = (number: number) => page.getByRole('article', { name: `第 ${number} 题`, exact: true });
         await expect(card(1).getByText('必须人工复核', { exact: true })).toBeVisible();
         await expect(card(2).getByText('必须人工复核', { exact: true })).toBeVisible();
+        // 两页提取后，三个匹配且有作答的题必须经过独立第二阶段判分。
+        await expect.poll(async () => (await scenario.model()).calls.filter((call) => call.operation === 'grade' && call.completed).length).toBe(3);
+        const gradeCalls = (await scenario.model()).calls.filter((call) => call.operation === 'grade');
+        expect(gradeCalls.every((call) => !call.hasImage && !call.failed && call.completed)).toBe(true);
+        const aiSuggestion = { recognizedAnswer: '正确答案', result: 'correct', awardedScore: 10, maxScore: 10, gradingReason: '测试夹具判定：结论及论证完整', gradingSource: 'ai', reviewStatus: 'pending' };
+        await expect(card(3).getByLabel('识别答案', { exact: true })).toHaveValue(aiSuggestion.recognizedAnswer);
+        await expect(card(3).getByLabel('结果', { exact: true })).toHaveValue(aiSuggestion.result);
+        await expect(card(3).getByLabel('得分', { exact: true })).toHaveValue('10');
+        await expect(card(3).getByLabel('判分理由 / 人工备注', { exact: true })).toHaveValue(aiSuggestion.gradingReason);
+        await expect(card(3).getByText('AI 建议，待整卷确认', { exact: true })).toBeVisible();
+        const aiAnswerWhere = { attemptId_examQuestionId: { attemptId, examQuestionId: paper.questions[2].id } };
+        expect(await scenario.db.examAttemptAnswer.findUniqueOrThrow({ where: aiAnswerWhere })).toMatchObject(aiSuggestion);
         await card(1).getByRole('button', { name: '查看作答区域', exact: true }).click();
         await expect(card(1).getByRole('img')).toBeVisible();
         const candidate = page.getByRole('listitem').filter({ has: page.getByText('待人工映射答案', { exact: true }) });
@@ -48,13 +60,15 @@ for (const mobile of [false, true]) {
         await expect(candidate.getByRole('button', { name: '已映射', exact: true })).toBeDisabled();
         await page.reload();
         await expect(card(4).getByLabel('识别答案', { exact: true })).toHaveValue('待人工映射答案');
-        for (const [number, result, score] of [[1, 'wrong', '0'], [2, 'wrong', '7'], [3, 'correct', '10'], [4, 'wrong', '0'], [5, 'not_attempted', '0']] as const) {
+        for (const [number, result, score] of [[1, 'wrong', '0'], [2, 'wrong', '7'], [4, 'wrong', '0'], [5, 'not_attempted', '0']] as const) {
             await card(number).getByLabel('识别答案', { exact: true }).fill(number === 5 ? '' : `人工修正答案 ${number}`);
             await card(number).getByLabel('结果', { exact: true }).selectOption(result);
             await card(number).getByLabel('得分', { exact: true }).fill(score);
             await card(number).getByRole('button', { name: '保存并标记已复核', exact: true }).click();
             await expect(card(number).getByText('已人工复核', { exact: true })).toBeVisible();
         }
+        // 第三题保留 AI 的 pending 建议直接整卷确认，不用人工结果掩盖判分链路。
+        expect(await scenario.db.examAttemptAnswer.findUniqueOrThrow({ where: aiAnswerWhere })).toMatchObject(aiSuggestion);
         expect(await scenario.db.errorItem.findMany({ where: { userId: scenario.user.id }, orderBy: { id: 'asc' } })).toEqual(baseline);
         expect(await scenario.db.practiceRecord.count({ where: { userId: scenario.user.id } })).toBe(0);
         expect((await scenario.model()).calls.filter((call) => call.operation === 'mastery')).toHaveLength(0);
@@ -85,10 +99,12 @@ for (const mobile of [false, true]) {
         await expect(page.getByRole('region', { name: '纸质作答历史' }).getByText('得分：17 / 50', { exact: true })).toBeVisible();
         const confirmed = await scenario.db.examAttempt.findUniqueOrThrow({ where: { id: attemptId }, include: { answers: true, pages: { orderBy: { order: 'asc' } } } });
         expect(confirmed).toMatchObject({ status: 'confirmed', totalScore: 17, maxScore: 50 });
+        expect(confirmed.answers.find((answer) => answer.examQuestionId === paper.questions[2].id)).toMatchObject(aiSuggestion);
         const records = await scenario.records();
         expect(records).toHaveLength(5);
         expect(records.every((record) => record.source === 'exam' && record.examAttemptId === attemptId)).toBeTruthy();
         expect(new Set(records.map((record) => record.examQuestionId)).size).toBe(5);
+        expect(records.find((record) => record.examQuestionId === paper.questions[2].id)).toMatchObject({ source: 'exam', result: 'correct', isCorrect: true, wrongAnswerText: aiSuggestion.recognizedAnswer, errorItemId: null });
         const questions = await scenario.db.examQuestion.findMany({ where: { paperId: paper.id }, orderBy: { order: 'asc' } });
         expect(questions[1].errorItemId).toBe(linked.id);
         expect(questions[2].errorItemId).toBeNull();
@@ -139,7 +155,7 @@ for (const mobile of [false, true]) {
         for (const answer of restored.answers) {
             const question = restored.paper.questions.find((item) => item.id === answer.examQuestionId)!;
             const original = confirmed.answers.find((item) => item.examQuestionId === paper.questions[question.order - 1].id)!;
-            expect(answer).toMatchObject({ recognizedAnswer: original.recognizedAnswer, regionJson: original.regionJson, result: original.result, awardedScore: original.awardedScore, reviewStatus: original.reviewStatus });
+            expect(answer).toMatchObject({ recognizedAnswer: original.recognizedAnswer, regionJson: original.regionJson, result: original.result, awardedScore: original.awardedScore, reviewStatus: original.reviewStatus, gradingSource: original.gradingSource, gradingReason: original.gradingReason });
             expect(await scenario.db.practiceRecord.count({ where: { userId: scenario.user.id, examAttemptId: restored.id, examQuestionId: question.id, errorItemId: question.errorItemId } })).toBe(1);
         }
         const secondRestored = await scenario.db.examAttempt.findFirstOrThrow({ where: { userId: scenario.user.id, comment: '同日第二份作答' }, include: { pages: true, answers: true } });
