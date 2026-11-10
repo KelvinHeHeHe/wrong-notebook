@@ -229,6 +229,36 @@ export interface AppConfig extends VendorConfigs {
 
 export type StatsRange = '7d' | '30d' | '90d' | '6m' | 'all';
 
+export interface ExamTrendPoint {
+    attemptId: string;
+    paperId: string;
+    paperTitle: string;
+    subjectId: string | null;
+    subjectName: string | null;
+    takenAt: string;
+    dateLabel: string;
+    totalScore: number;
+    maxScore: number;
+    rate: number;
+    wrongCount: number;
+}
+
+export interface ExamTrendSummary {
+    examCount: number;
+    averageRate: number | null;
+    latestRate: number | null;
+    changeFromPrevious: number | null;
+    wrongCount: number;
+}
+
+export interface ExamTrendStatsData {
+    range: StatsRange;
+    subjectId?: string;
+    subjectName?: string;
+    summary: ExamTrendSummary;
+    points: ExamTrendPoint[];
+}
+
 export interface AnalyticsData {
     totalErrors: number;
     newCount: number;
