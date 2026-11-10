@@ -29,7 +29,7 @@ export interface StatsRangeInfo {
 
 /**
  * 根据范围计算起始时间。
- * 7d：6 天前的零点；30d：29 天前的零点；6m：5 个月前的月初；all：null。
+ * 7d：6 天前的零点；30d：29 天前的零点；90d：89 天前的零点；6m：5 个月前的月初；all：null。
  */
 export function getRangeStart(range: StatsRange, now: Date, timeZone: string): Date | null {
     switch (range) {
@@ -37,6 +37,8 @@ export function getRangeStart(range: StatsRange, now: Date, timeZone: string): D
             return getDayRange(now, timeZone, -6).start;
         case '30d':
             return getDayRange(now, timeZone, -29).start;
+        case '90d':
+            return getDayRange(now, timeZone, -89).start;
         case '6m':
             return getMonthStart(now, timeZone, -5);
         case 'all':
@@ -44,7 +46,7 @@ export function getRangeStart(range: StatsRange, now: Date, timeZone: string): D
     }
 }
 
-/** 7d/30d 按天分桶，6m/all 按月分桶 */
+/** 7d/30d 按天分桶，90d/6m/all 按月分桶 */
 export function getStatsGranularity(range: StatsRange): StatsGranularity {
     return range === '7d' || range === '30d' ? 'day' : 'month';
 }
@@ -92,7 +94,7 @@ export function buildStatsBuckets(
                 monthStart = getMonthStart(now, timeZone, 0);
             }
         } else {
-            // 6m
+            // 90d/6m
             monthStart = start ?? getMonthStart(now, timeZone, -5);
         }
 

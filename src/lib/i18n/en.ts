@@ -698,6 +698,7 @@ export const en = {
             monthlyTrend: "Monthly Trend",
             range7d: "Last 7 Days",
             range30d: "Last 30 Days",
+            range90d: "Last 90 Days",
             range6m: "Last 6 Months",
             rangeAll: "All Time",
             allSubjects: "All Subjects",

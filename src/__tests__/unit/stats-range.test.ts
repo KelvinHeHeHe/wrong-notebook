@@ -14,6 +14,7 @@ describe('parseStatsRange', () => {
     it('合法值原样返回', () => {
         expect(parseStatsRange('7d')).toBe('7d');
         expect(parseStatsRange('30d')).toBe('30d');
+        expect(parseStatsRange('90d')).toBe('90d');
         expect(parseStatsRange('6m')).toBe('6m');
         expect(parseStatsRange('all')).toBe('all');
     });
@@ -25,6 +26,12 @@ describe('parseStatsRange', () => {
         expect(parseStatsRange(undefined)).toBe('30d');
         expect(parseStatsRange('7D')).toBe('30d');
         expect(parseStatsRange('1y')).toBe('30d');
+    });
+
+    it('允许调用方指定默认范围且不改变全局默认值', () => {
+        expect(parseStatsRange(null, '90d')).toBe('90d');
+        expect(parseStatsRange('invalid', '90d')).toBe('90d');
+        expect(parseStatsRange(null)).toBe('30d');
     });
 });
 
@@ -41,6 +48,23 @@ describe('getRangeStart', () => {
         const start = getRangeStart('30d', now, TZ);
         // 北京时间 2026-09-19 00:00 = UTC 2026-09-18T16:00:00Z
         expect(start?.toISOString()).toBe('2026-09-18T16:00:00.000Z');
+    });
+
+    it('90d 返回 89 天前的零点（北京时间）', () => {
+        const start = getRangeStart('90d', now, TZ);
+        expect(start?.toISOString()).toBe('2026-07-20T16:00:00.000Z');
+    });
+
+    it('90d 跨年时仍返回应用时区 89 天前零点', () => {
+        const janNow = new Date('2026-01-15T12:00:00Z');
+        expect(getRangeStart('90d', janNow, TZ)?.toISOString())
+            .toBe('2025-10-17T16:00:00.000Z');
+    });
+
+    it('90d 跨纽约夏令时边界时保持当地零点', () => {
+        const nyNow = new Date('2026-11-10T17:00:00Z');
+        expect(getRangeStart('90d', nyNow, 'America/New_York')?.toISOString())
+            .toBe('2026-08-13T04:00:00.000Z');
     });
 
     it('6m 返回 5 个月前的月初（北京时间）', () => {
@@ -67,7 +91,8 @@ describe('getStatsGranularity', () => {
         expect(getStatsGranularity('30d')).toBe('day');
     });
 
-    it('6m/all 为 month 粒度', () => {
+    it('90d/6m/all 为 month 粒度', () => {
+        expect(getStatsGranularity('90d')).toBe('month');
         expect(getStatsGranularity('6m')).toBe('month');
         expect(getStatsGranularity('all')).toBe('month');
     });
@@ -105,6 +130,19 @@ describe('buildStatsBuckets', () => {
         // 跨月边界正确
         expect(buckets[0].start.toISOString()).toBe('2026-04-30T16:00:00.000Z');
         expect(buckets[0].end.toISOString()).toBe('2026-05-31T16:00:00.000Z');
+    });
+
+    it('90d 从范围起点所在月开始生成月度分桶', () => {
+        const info = resolveStatsRange('90d', null, now, TZ);
+        expect(info.start?.toISOString()).toBe('2026-07-20T16:00:00.000Z');
+        expect(info.granularity).toBe('month');
+        expect(info.buckets.map(bucket => bucket.label)).toEqual([
+            '2026-07',
+            '2026-08',
+            '2026-09',
+            '2026-10',
+        ]);
+        expect(info.buckets[0].start.toISOString()).toBe('2026-06-30T16:00:00.000Z');
     });
 
     it('6m 跨年时正确生成月度分桶', () => {

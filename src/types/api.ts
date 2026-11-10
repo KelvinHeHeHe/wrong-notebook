@@ -227,7 +227,7 @@ export interface AppConfig extends VendorConfigs {
 }
 
 
-export type StatsRange = '7d' | '30d' | '6m' | 'all';
+export type StatsRange = '7d' | '30d' | '90d' | '6m' | 'all';
 
 export interface AnalyticsData {
     totalErrors: number;

@@ -17,19 +17,24 @@ const ALL_SUBJECTS_VALUE = '__all__';
 const RANGE_OPTIONS = [
     { value: '7d', key: 'range7d', fallback: 'Last 7 Days' },
     { value: '30d', key: 'range30d', fallback: 'Last 30 Days' },
+    { value: '90d', key: 'range90d', fallback: 'Last 90 Days' },
     { value: '6m', key: 'range6m', fallback: 'Last 6 Months' },
     { value: 'all', key: 'rangeAll', fallback: 'All Time' },
 ] as const satisfies readonly { value: StatsRange; key: string; fallback: string }[];
 
+interface StatsFilterBarProps {
+    defaultRange?: StatsRange;
+}
+
 /** 统计中心筛选栏：时间范围 + 学科，保存在 URL 中与 ?tab= 共存 */
-export function StatsFilterBar() {
+export function StatsFilterBar({ defaultRange = '30d' }: StatsFilterBarProps) {
     const { t } = useLanguage();
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const [subjects, setSubjects] = useState<Notebook[]>([]);
 
-    const range = parseStatsRange(searchParams.get("range"));
+    const range = parseStatsRange(searchParams.get("range"), defaultRange);
     const subjectParam = searchParams.get("subject") ?? "";
 
     useEffect(() => {
@@ -53,8 +58,8 @@ export function StatsFilterBar() {
     };
 
     const handleRangeChange = (next: StatsRange) => {
-        // 30d 是默认值，URL 中省略
-        updateParams("range", next === '30d' ? '' : next);
+        // 当前标签页的默认值在 URL 中省略
+        updateParams("range", next === defaultRange ? '' : next);
     };
 
     const handleSubjectChange = (value: string) => {

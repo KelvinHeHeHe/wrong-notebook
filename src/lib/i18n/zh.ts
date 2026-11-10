@@ -698,6 +698,7 @@ export const zh = {
             monthlyTrend: "月度趋势",
             range7d: "近 7 天",
             range30d: "近 30 天",
+            range90d: "近 90 天",
             range6m: "近 6 个月",
             rangeAll: "全部",
             allSubjects: "全部学科",
