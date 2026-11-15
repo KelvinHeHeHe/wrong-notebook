@@ -16,6 +16,7 @@ function row(input: {
     maxScore: number;
     results?: Array<string | null>;
     subjectId?: string | null;
+    subjectIds?: string[];
 }) {
     return {
         id: input.id,
@@ -27,6 +28,7 @@ function row(input: {
             id: `paper-${input.id}`,
             title: `试卷 ${input.id}`,
             subjectId: input.subjectId ?? 'subject-math',
+            subjectIds: JSON.stringify(input.subjectIds ?? [input.subjectId ?? 'subject-math']),
         },
         answers: (input.results ?? []).map(result => ({ result })),
     };

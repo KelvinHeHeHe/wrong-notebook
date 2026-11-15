@@ -82,6 +82,13 @@ describe('StatsFilterBar', () => {
         expect(findRangeButton('近 30 天').getAttribute('aria-pressed')).toBe('false');
     });
 
+    it('时间范围按钮组允许在窄屏换行', async () => {
+        await render('90d');
+
+        const group = container.querySelector('[role="group"]');
+        expect(group?.classList.contains('flex-wrap')).toBe(true);
+    });
+
     it('考试标签选择 30 天时保留显式 URL 参数', async () => {
         await render('90d');
 

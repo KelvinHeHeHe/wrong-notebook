@@ -40,7 +40,7 @@ vi.mock('@/contexts/LanguageContext', () => ({
                     score: '得分',
                     rate: '得分率',
                     wrongCount: '错题 {count} 道',
-                    detailAria: '查看 {title} 的作答详情',
+                    detailAria: '查看 {title}（{date}，{score} / {maxScore}）的作答详情',
                     loading: '正在加载考试趋势',
                 },
             },
@@ -187,7 +187,8 @@ describe('ExamTrends', () => {
         expect(container.textContent).toContain('错题 2 道');
         const detail = [...container.querySelectorAll('a')]
             .find(link => link.getAttribute('href') === '/exam-attempts/attempt-1');
-        expect(detail?.getAttribute('aria-label')).toBe('查看 家庭数学周测 的作答详情');
+        expect(detail?.getAttribute('aria-label'))
+            .toBe('查看 家庭数学周测（2026-11-01，17 / 50）的作答详情');
     });
 
     it('单次考试不虚构变化，负变化保留负号', async () => {

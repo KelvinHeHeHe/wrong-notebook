@@ -69,7 +69,7 @@ export function StatsFilterBar({ defaultRange = '30d' }: StatsFilterBarProps) {
     return (
         <div className="flex flex-wrap items-center gap-2 mb-4">
             {/* 时间范围 */}
-            <div className="flex rounded-lg bg-muted p-0.5" role="group" aria-label={t.stats?.timeRange || "Time Range"}>
+            <div className="flex flex-wrap rounded-lg bg-muted p-0.5" role="group" aria-label={t.stats?.timeRange || "Time Range"}>
                 {RANGE_OPTIONS.map(opt => {
                     const active = range === opt.value;
                     const text = t.stats?.[opt.key] || opt.fallback;

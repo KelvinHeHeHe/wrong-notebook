@@ -724,7 +724,7 @@ export const zh = {
                 emptyTitle: "暂无考试趋势",
                 emptyDescription: "确认一次考试成绩后显示趋势",
                 goToExams: "前往试卷",
-                detailAria: "查看 {title} 的作答详情",
+                detailAria: "查看 {title}（{date}，{score} / {maxScore}）的作答详情",
                 pointAria: "{title}，{date}，得分率 {rate}%",
                 loading: "正在加载考试趋势",
             },

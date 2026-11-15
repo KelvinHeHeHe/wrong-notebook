@@ -36,14 +36,25 @@ function request(query = ''): Request {
     return new Request(`http://localhost/api/stats/exams${query}`);
 }
 
-function attempt(id: string, takenAt: string) {
+function attempt(
+    id: string,
+    takenAt: string,
+    paper: { subjectId: string | null; subjectIds?: string } = { subjectId: 'subject-math' },
+) {
     return {
         id,
         takenAt: new Date(takenAt),
         createdAt: new Date(takenAt),
         totalScore: 17,
         maxScore: 50,
-        paper: { id: `paper-${id}`, title: `试卷 ${id}`, subjectId: 'subject-math' },
+        paper: {
+            id: `paper-${id}`,
+            title: `试卷 ${id}`,
+            subjectId: paper.subjectId,
+            subjectIds: paper.subjectIds ?? JSON.stringify(
+                paper.subjectId ? [paper.subjectId] : [],
+            ),
+        },
         answers: [{ result: 'wrong' }],
     };
 }
@@ -83,7 +94,10 @@ describe('GET /api/stats/exams', () => {
                 status: 'confirmed',
                 totalScore: { not: null },
                 maxScore: { gt: 0 },
-                takenAt: { gte: new Date('2026-08-12T16:00:00.000Z') },
+                takenAt: {
+                    gte: new Date('2026-08-12T16:00:00.000Z'),
+                    lt: new Date('2026-11-10T16:00:00.000Z'),
+                },
             },
             select: {
                 id: true,
@@ -91,7 +105,9 @@ describe('GET /api/stats/exams', () => {
                 createdAt: true,
                 totalScore: true,
                 maxScore: true,
-                paper: { select: { id: true, title: true, subjectId: true } },
+                paper: {
+                    select: { id: true, title: true, subjectId: true, subjectIds: true },
+                },
                 answers: { select: { result: true } },
             },
             orderBy: [{ takenAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
@@ -99,24 +115,40 @@ describe('GET /api/stats/exams', () => {
         expect(JSON.stringify(data)).not.toContain('NaN');
     });
 
-    it('应用时间边界只包含起点及之后的作答', async () => {
+    it('应用时间边界包含起点至当天末且排除次日作答', async () => {
         const before = attempt('before', '2026-08-12T15:59:59.999Z');
         const atBoundary = attempt('at-boundary', '2026-08-12T16:00:00.000Z');
+        const todayLast = attempt('today-last', '2026-11-10T15:59:59.999Z');
+        const tomorrow = attempt('tomorrow', '2026-11-10T16:00:00.000Z');
         mocks.examAttemptFindMany.mockImplementation(({ where }: {
-            where: { takenAt?: { gte: Date } };
+            where: { takenAt?: { gte: Date; lt: Date } };
         }) => {
             const start = where.takenAt?.gte;
-            return Promise.resolve([before, atBoundary].filter(item => !start || item.takenAt >= start));
+            const end = where.takenAt?.lt;
+            return Promise.resolve([before, atBoundary, todayLast, tomorrow].filter(item => (
+                (!start || item.takenAt >= start) && (!end || item.takenAt < end)
+            )));
         });
 
         const data = await (await GET(request())).json();
 
         expect(data.points.map((point: { attemptId: string }) => point.attemptId))
-            .toEqual(['at-boundary']);
+            .toEqual(['at-boundary', 'today-last']);
     });
 
     it('合法学科限定试卷并回传筛选信息', async () => {
         mocks.subjectFindFirst.mockResolvedValue({ id: 'subject-math', name: '数学' });
+
+        mocks.examAttemptFindMany.mockResolvedValue([
+            attempt('generated-math', '2026-11-01T01:00:00Z', {
+                subjectId: null,
+                subjectIds: '["subject-math"]',
+            }),
+            attempt('generated-english', '2026-11-02T01:00:00Z', {
+                subjectId: null,
+                subjectIds: '["subject-english"]',
+            }),
+        ]);
 
         const data = await (await GET(request('?subjectId=subject-math'))).json();
 
@@ -124,10 +156,15 @@ describe('GET /api/stats/exams', () => {
             where: { id: 'subject-math', userId: 'user-123' },
             select: { id: true, name: true },
         });
-        expect(mocks.examAttemptFindMany.mock.calls[0][0].where.paper)
-            .toEqual({ subjectId: 'subject-math' });
+        expect(mocks.examAttemptFindMany.mock.calls[0][0].where.paper).toBeUndefined();
         expect(data.subjectId).toBe('subject-math');
         expect(data.subjectName).toBe('数学');
+        expect(data.points).toHaveLength(1);
+        expect(data.points[0]).toMatchObject({
+            attemptId: 'generated-math',
+            subjectId: 'subject-math',
+            subjectName: '数学',
+        });
     });
 
     it('其他用户学科按未筛选处理且不移除顶层用户隔离', async () => {
@@ -153,6 +190,25 @@ describe('GET /api/stats/exams', () => {
             select: { id: true, name: true },
         });
         expect(data.points[0].subjectName).toBe('数学');
+    });
+
+    it('不向响应泄露不属于当前用户的试卷学科快照', async () => {
+        mocks.examAttemptFindMany.mockResolvedValue([
+            attempt('foreign', '2026-11-01T01:00:00Z', {
+                subjectId: 'foreign-subject',
+                subjectIds: '["foreign-subject"]',
+            }),
+        ]);
+        mocks.subjectFindMany.mockResolvedValue([]);
+
+        const data = await (await GET(request())).json();
+
+        expect(mocks.subjectFindMany).toHaveBeenCalledWith({
+            where: { userId: 'user-123', id: { in: ['foreign-subject'] } },
+            select: { id: true, name: true },
+        });
+        expect(data.points[0].subjectId).toBeNull();
+        expect(data.points[0].subjectName).toBeNull();
     });
 
     it('all 不添加时间起点且非法范围回落 90 天', async () => {

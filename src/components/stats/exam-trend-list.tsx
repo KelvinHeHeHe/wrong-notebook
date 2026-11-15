@@ -30,8 +30,13 @@ export function ExamTrendList({ points }: { points: ExamTrendPoint[] }) {
             <CardContent className="space-y-2">
                 {points.map(point => {
                     const detailAria = replaceTokens(
-                        copy?.detailAria || "View attempt details for {title}",
-                        { title: point.paperTitle },
+                        copy?.detailAria || "View {title} attempt from {date}, score {score} / {maxScore}",
+                        {
+                            title: point.paperTitle,
+                            date: point.dateLabel,
+                            score: String(point.totalScore),
+                            maxScore: String(point.maxScore),
+                        },
                     );
                     const wrongCount = replaceTokens(
                         copy?.wrongCount || "{count} incorrect",

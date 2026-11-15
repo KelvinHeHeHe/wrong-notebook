@@ -3,7 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { getAppTimeZone } from "@/lib/config";
-import { formatDateTime } from "@/lib/date-time";
+import { formatDateTime, getDayRange } from "@/lib/date-time";
 import { prisma } from "@/lib/prisma";
 import { resolveStatsSubjectId } from "@/lib/stats/stats-filter";
 import { getRangeStart } from "@/lib/stats/stats-range";
@@ -20,6 +20,7 @@ export interface ExamTrendSourceRow {
         id: string;
         title: string;
         subjectId: string | null;
+        subjectIds: string;
     };
     answers: Array<{ result: string | null }>;
 }
@@ -42,6 +43,24 @@ function compareRows(left: ExamTrendSourceRow, right: ExamTrendSourceRow): numbe
         || left.id.localeCompare(right.id);
 }
 
+function parsePaperSubjectIds(value: string): string[] {
+    try {
+        const parsed: unknown = JSON.parse(value);
+        return Array.isArray(parsed)
+            ? parsed.filter((item): item is string => typeof item === 'string')
+            : [];
+    } catch {
+        return [];
+    }
+}
+
+function getPaperSubjectIds(paper: ExamTrendSourceRow['paper']): string[] {
+    return [...new Set([
+        ...(paper.subjectId ? [paper.subjectId] : []),
+        ...parsePaperSubjectIds(paper.subjectIds),
+    ])];
+}
+
 export function buildExamTrendStats(
     rows: ExamTrendSourceRow[],
     options: BuildExamTrendOptions,
@@ -50,6 +69,13 @@ export function buildExamTrendStats(
         .sort(compareRows)
         .map(row => {
             const rate = roundRate(row.totalScore / row.maxScore * 100);
+            const ownedSubjectIds = getPaperSubjectIds(row.paper)
+                .filter(id => options.subjectNames.has(id));
+            const subjectId = options.subject && ownedSubjectIds.includes(options.subject.id)
+                ? options.subject.id
+                : ownedSubjectIds.length === 1
+                    ? ownedSubjectIds[0]
+                    : null;
             const wrongCount = row.answers.reduce(
                 (count, answer) => count + (answer.result === 'wrong' || answer.result === 'not_attempted' ? 1 : 0),
                 0,
@@ -58,9 +84,9 @@ export function buildExamTrendStats(
                 attemptId: row.id,
                 paperId: row.paper.id,
                 paperTitle: row.paper.title,
-                subjectId: row.paper.subjectId,
-                subjectName: row.paper.subjectId
-                    ? options.subjectNames.get(row.paper.subjectId) ?? null
+                subjectId,
+                subjectName: subjectId
+                    ? options.subjectNames.get(subjectId) ?? null
                     : null,
                 takenAt: row.takenAt.toISOString(),
                 dateLabel: formatDateTime(row.takenAt, 'yyyy-MM-dd', options.timeZone),
@@ -106,7 +132,7 @@ const EXAM_TREND_SELECT = {
     createdAt: true,
     totalScore: true,
     maxScore: true,
-    paper: { select: { id: true, title: true, subjectId: true } },
+    paper: { select: { id: true, title: true, subjectId: true, subjectIds: true } },
     answers: { select: { result: true } },
 } satisfies Prisma.ExamAttemptSelect;
 
@@ -118,15 +144,16 @@ export async function getExamTrendStats(input: {
 }): Promise<ExamTrendStatsData> {
     const timeZone = getAppTimeZone();
     const subject = await resolveStatsSubjectId(input.userId, input.subjectIdParam);
-    const start = getRangeStart(input.range, input.now ?? new Date(), timeZone);
+    const now = input.now ?? new Date();
+    const start = getRangeStart(input.range, now, timeZone);
+    const end = start ? getDayRange(now, timeZone, 1).start : null;
     const rows = await prisma.examAttempt.findMany({
         where: {
             userId: input.userId,
             status: 'confirmed',
             totalScore: { not: null },
             maxScore: { gt: 0 },
-            ...(start ? { takenAt: { gte: start } } : {}),
-            ...(subject ? { paper: { subjectId: subject.id } } : {}),
+            ...(start && end ? { takenAt: { gte: start, lt: end } } : {}),
         },
         select: EXAM_TREND_SELECT,
         orderBy: [{ takenAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
@@ -134,15 +161,14 @@ export async function getExamTrendStats(input: {
 
     const validRows: ExamTrendSourceRow[] = rows.flatMap(row => {
         if (row.totalScore === null || row.maxScore === null || row.maxScore <= 0) return [];
+        if (subject && !getPaperSubjectIds(row.paper).includes(subject.id)) return [];
         return [{
             ...row,
             totalScore: row.totalScore,
             maxScore: row.maxScore,
         }];
     });
-    const subjectIds = [...new Set(validRows
-        .map(row => row.paper.subjectId)
-        .filter((id): id is string => Boolean(id)))];
+    const subjectIds = [...new Set(validRows.flatMap(row => getPaperSubjectIds(row.paper)))];
     const subjects = subjectIds.length > 0
         ? await prisma.subject.findMany({
             where: { userId: input.userId, id: { in: subjectIds } },

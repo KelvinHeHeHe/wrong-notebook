@@ -130,6 +130,14 @@ for (const mobile of [false, true]) {
             await expect.poll(async () => page.getByRole('tablist').evaluate((element) => (
                 window.getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length
             ))).toBe(2);
+            await page.evaluate(() => localStorage.setItem('app-language', 'en'));
+            await page.reload();
+            const englishRange = page.getByRole('group', { name: 'Time Range', exact: true });
+            await expect(englishRange).toBeVisible();
+            expect(await englishRange.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+            expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+            await page.evaluate(() => localStorage.setItem('app-language', 'zh'));
+            await page.reload();
         }
         await firstAttemptLink.click();
         await expect(page).toHaveURL(`/exam-attempts/${attemptId}`);
@@ -152,7 +160,12 @@ for (const mobile of [false, true]) {
         await expect(summaryCard('平均得分率').getByText('67%', { exact: true })).toBeVisible();
         await expect(summaryCard('最近一次').getByText('100%', { exact: true })).toBeVisible();
         await expect(summaryCard('较上一次').getByText('+66.0 个百分点', { exact: true })).toBeVisible();
-        await expect(page.getByRole('link', { name: '查看 合成纸质作答验收卷 的作答详情', exact: true })).toHaveCount(2);
+        await expect(page.getByRole('link', {
+            name: /^查看 合成纸质作答验收卷（.*，17 \/ 50）的作答详情$/,
+        })).toHaveCount(1);
+        await expect(page.getByRole('link', {
+            name: /^查看 合成纸质作答验收卷（.*，50 \/ 50）的作答详情$/,
+        })).toHaveCount(1);
         await expect(page.getByText('17 / 50', { exact: true })).toBeVisible();
         await expect(page.getByText('50 / 50', { exact: true })).toBeVisible();
 

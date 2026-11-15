@@ -724,7 +724,7 @@ export const en = {
                 emptyTitle: "No Exam Trends Yet",
                 emptyDescription: "Confirm an exam score to start tracking trends.",
                 goToExams: "Go to Exams",
-                detailAria: "View attempt details for {title}",
+                detailAria: "View {title} attempt from {date}, score {score} / {maxScore}",
                 pointAria: "{title}, {date}, score rate {rate}%",
                 loading: "Loading exam trends",
             },
