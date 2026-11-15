@@ -180,6 +180,12 @@ Generated animations and GeoGebra demos can be deleted after confirmation. Check
 
 Filter by mastery status, knowledge point, question type, time, grade and semester, or paper level, then act on the results in bulk or print them. Question types support multi-select, including "Not set" (questions without a question type). The multi-select bar's **Move to Notebook** moves the selected error items to another notebook under the same account, keeping their knowledge-point tags; **Export** offers three formats for selected error items (see [Question Exchange Format](../QUESTION_FORMAT.md)): **JSON** has the most complete fields and suits backups or migration; **Excel** columns match the question bank import template so it can be re-imported directly; **Word** is designed for printing as an exam paper, with answers and analysis collected in an "参考答案" section at the end, and formulas exported as LaTeX text. All three formats contain only question content, without practice records or other data; for a full backup use **Settings → Data Management → Export Data**. Before deleting, confirm the filters and selection; [back up your data](Backup-and-Restore-en) when it must be kept long term.
 
+## Exam score trends
+
+After a child writes on a printed exam and returns photos, confirm the score on the attempt review page. Only attempts with a valid score and **Confirmed** status appear under **Statistics Center → Exam Trends**; uploaded, recognizing, review and failed drafts are excluded.
+
+Exam Trends shows the latest 90 days by default and can be filtered by subject or 7 days, 30 days, 90 days, 6 months, or all time. The line keeps one score-rate point per exam so papers with different maximum scores remain comparable. Summary cards show exam count, average rate, latest rate, change from the previous exam, and total incorrect answers. Hover a point or use the attempt list below the chart to inspect the original score / maximum and incorrect count; select either entry to open the existing attempt details. Multiple attempts on the same day remain separate.
+
 ## Markdown and formulas
 
 Questions, answers and analysis support Markdown, and formulas are rendered with KaTeX:
