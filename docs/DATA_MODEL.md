@@ -143,4 +143,4 @@ uploaded → recognizing → review → confirmed
 
 MVP 继续使用“data URL 存 SQLite、备份 JSON 携带图片”，减少第一批部署复杂度。页面上传沿用 MIME、页数、尺寸、像素和压缩限制，并用 checksum 处理重复页。
 
-代价是数据库、导出文件和导入内存峰值会随页图线性增长。家庭真实数据超过可接受体积后，第二批应把 `imageData` 抽象成受控应用数据目录的 `storageKey`，并使用 ZIP + manifest 备份；在有容量证据前不提前增加文件同步和迁移复杂度。
+代价是数据库、导出文件和导入内存峰值会随页图线性增长。当前设置页把整份 JSON 一次提交，导入接口对 `Content-Length` 超过 50 MiB 的请求返回 400，导出端没有对称上限；现有自动化只验证远低于该上限的小型夹具。因此家庭积累的合法大备份可能可以导出、却无法通过设置页恢复。达到该规模前应使用[实例级备份恢复](../doc/wiki/Backup-and-Restore.md)；第二批再增加导出体积预警，或把 `imageData` 抽象成受控应用数据目录的 `storageKey` 并使用 ZIP + manifest 备份。
