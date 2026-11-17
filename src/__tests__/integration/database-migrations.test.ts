@@ -176,6 +176,59 @@ describe('真实 Prisma 数据库迁移', () => {
         expect(deploy()).toContain('No pending migrations');
     }, 120000);
 
+    it('考试 MVP 前数据库升级后保留旧试卷并创建空的新考试集合', () => {
+        deploy(migrations.filter((name) => name <= '20261105135634_add_telemetry_tables'));
+        openDatabase();
+        database!.exec(`
+            INSERT INTO "User" (id, email, password, updatedAt)
+                VALUES ('near-cutoff-user', 'near-cutoff@example.com', 'test-only', '2026-11-05');
+            INSERT INTO "Subject" (id, name, userId, updatedAt)
+                VALUES ('near-cutoff-math', '数学', 'near-cutoff-user', '2026-11-05');
+            INSERT INTO "ErrorItem" (id, shortId, userId, subjectId, originalImageUrl, questionText, updatedAt)
+                VALUES ('near-cutoff-item', 'NearCutoff', 'near-cutoff-user', 'near-cutoff-math', 'legacy-image', '迁移前错题', '2026-11-05');
+            INSERT INTO "ExamPaper" (id, userId, title, scope, difficulty, requestedCount, subjectIds, updatedAt)
+                VALUES ('near-cutoff-paper', 'near-cutoff-user', '考试 MVP 前试卷', 'all', 'medium', 1, '["near-cutoff-math"]', '2026-11-05');
+            INSERT INTO "ExamQuestion" (id, paperId, "order", errorItemId, sourceShortId)
+                VALUES ('near-cutoff-question', 'near-cutoff-paper', 0, 'near-cutoff-item', 'NearCutoff');
+            INSERT INTO "PracticeRecord" (id, userId, errorItemId, examQuestionId, result, source, wrongAnswerText)
+                VALUES ('near-cutoff-practice', 'near-cutoff-user', 'near-cutoff-item', 'near-cutoff-question', 'wrong', 'manual', '迁移前作答');
+        `);
+        const before = Object.fromEntries(['User', 'Subject', 'ErrorItem', 'ExamPaper', 'ExamQuestion', 'PracticeRecord']
+            .map((table) => [table, rows(table)]));
+        closeDatabase();
+
+        deploy();
+        openDatabase();
+        expect(rows('User')).toEqual(before.User.map((row) => ({ ...row, confirmBeforeImport: 1 })));
+        expect(rows('Subject')).toEqual(before.Subject);
+        expect(rows('ErrorItem')).toEqual(before.ErrorItem);
+        expect(rows('ExamPaper')).toEqual(before.ExamPaper.map((row) => ({
+            ...row,
+            origin: 'generated',
+            subjectId: null,
+            gradeSemester: null,
+            examType: null,
+            examDate: null,
+            totalScore: null,
+            sourceFileName: null,
+        })));
+        expect(rows('ExamQuestion')).toEqual(before.ExamQuestion.map((row) => ({
+            ...row,
+            externalNumber: null,
+            pageNumber: null,
+            regionJson: null,
+            recognitionConfidence: null,
+        })));
+        expect(rows('PracticeRecord')).toEqual(before.PracticeRecord.map((row) => ({ ...row, examAttemptId: null })));
+        for (const table of ['ExamPaperPage', 'ExamAttempt', 'ExamAttemptPage', 'ExamAttemptAnswer']) {
+            expect(rows(table), `${table} 应为空`).toEqual([]);
+        }
+        expectConstraints();
+        closeDatabase();
+
+        expect(deploy()).toContain('No pending migrations');
+    }, 120000);
+
     it('纸质作答页升级后保留旧行并将识别结果初始化为 null', () => {
         deploy(migrations.filter((name) => name < '20261108160000_add_attempt_page_recognition'));
         openDatabase();
