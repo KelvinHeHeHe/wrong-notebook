@@ -1,7 +1,7 @@
 # 家庭考试 MVP 验收报告
 
-> 验收日期：2026-11-17
-> 范围：任务 02～06，本地发布前门禁
+> 验收日期：2026-11-18
+> 范围：任务 02～07，本地发布前门禁
 > 状态：本地功能与 Next.js 安全升级门禁通过；正式发布仍待远端 CI 和外部验收
 
 ## 1. 验收口径
@@ -20,12 +20,13 @@
 | 整卷 PDF 客户端处理 | `src/__tests__/unit/exam-import-client.test.ts` | 注入模拟 PDF 文档/渲染器，验证全页、页序、页数上限与异常处理；不是浏览器发布流程 | 通过 |
 | 首页题库 PDF 浏览器导入 | `e2e/file-import-pdf.spec.ts` | 文字/扫描 PDF、页码范围和异常文件进入题库批次；不经过 `/exams/import` | 通过 |
 | 发布与打印 | `e2e/exam-import.spec.ts` | 发布后复用现有详情、打印 6 题 | 通过 |
+| 打印二维码与扫码回传 | `e2e/exam-print-code.spec.ts`、打印组件测试 | 二维码/短码/版次、登录回跳、旧版警告、手机窄屏与所有权隔离 | 通过 |
 | 导入卷进入纸质回传 | `e2e/exam-import.spec.ts` | 真实 `paperId` 打开 `/exams/:id/attempts/new`，标题与上传控件正确 | 通过 |
 | 打印卷拍照回传 | `e2e/exam-attempt.spec.ts` | 桌面/手机、多页、部分失败、两阶段识别 | 通过 |
 | 人工复核与部分分 | `e2e/exam-attempt.spec.ts`、作答复核集成测试 | 题目映射、识别候选、人工更正、低置信度复核 | 通过 |
 | 确认入账 | `e2e/exam-attempt.spec.ts`、`exam-attempt-confirm.test.ts` | 事务、幂等、错题/练习记录、掌握度触发 | 通过 |
 | 成绩趋势与详情 | `e2e/exam-attempt.spec.ts`、`exam-trends` 单元/集成测试 | 仅 confirmed、得分率、时区、详情跳转 | 通过 |
-| v13 导出与空账号恢复 | `e2e/exam-attempt.spec.ts`、`data-backup.test.ts` | 页图、识别候选、逐题评分、同日双作答和关联练习记录 | 通过 |
+| v14 导出与空账号恢复 | `e2e/exam-attempt.spec.ts`、`data-backup.test.ts` | 试卷短码、页图、识别候选、逐题评分、同日双作答和关联练习记录 | 通过 |
 | AI 外发授权 | `e2e/auth-flow.spec.ts`、`ai-consent.test.ts`、作答识别 SQLite 测试 | 未授权拒绝、用户 Provider 配置、本地模拟模型 | 通过 |
 | 新库和旧库升级 | `database-migrations.test.ts` | 全新库、近端旧库、约束、幂等部署 | 通过 |
 
@@ -53,9 +54,10 @@
 
 | 输入格式 | 当前恢复与再导出契约 | 结果 |
 | --- | --- | --- |
-| v11 | 旧试卷恢复为 `generated`，四个新集合为空，再导出为 v13 | 通过 |
-| v12 | 作答页缺失的 `recognitionResult` 规范化为 `null`，再导出为 v13 | 通过 |
-| v13 | 元数据、页图、识别候选、独立作答、逐题评分和练习关联完整往返 | 通过 |
+| v11 | 旧试卷恢复为 `generated`，四个新集合为空，补齐短码后再导出为 v14 | 通过 |
+| v12 | 作答页缺失的 `recognitionResult` 规范化为 `null`，补齐短码后再导出为 v14 | 通过 |
+| v13 | 元数据、页图、识别候选、独立作答、逐题评分和练习关联保留，补齐短码后再导出为 v14 | 通过 |
+| v14 | 全部考试数据与合法短码完整往返；目标库短码冲突时安全换码 | 通过 |
 
 真实 SQLite 集成测试还覆盖重复导入幂等、同日两次作答保留、跨用户/跨试卷关联隔离和事务回滚。
 
@@ -74,8 +76,9 @@
 - 任务 04：纸质回传、页级识别候选、逐题复核、幂等确认和学习历史入账。
 - 任务 05：已确认考试的成绩趋势、筛选、摘要和详情跳转。
 - 任务 06：近端迁移、v11 再导出、导入卷回传入口和维护者验收文档。
+- 任务 07：试卷级二维码、稳定短码、内容版次、登录保护扫码回传和备份 v14。
 - 发布门禁安全升级：按官方 security 升级器结论，将 Next.js 16.4.3 升级到 16.4.6，并启用 `experimental.agentUpgrade='security'`。
-- 当前备份格式 v13，兼容导入 v11/v12；旧生成试卷和旧练习记录保留。
+- 当前备份格式 v14，兼容导入 v11～v13；旧生成试卷和旧练习记录保留。
 
 ## 7. 已知限制
 
@@ -83,6 +86,7 @@
 2. 页图以 data URL 存 SQLite 并进入 JSON 备份，数据库和导入内存随页数增长。当前 JSON 导入接口拒绝 `Content-Length` 超过 50 MiB 的请求，而导出没有对称上限；自动化只覆盖远低于该上限的小型夹具，因此合法导出的超大备份可能无法通过设置页恢复。达到该规模前应使用[实例级备份恢复](../doc/wiki/Backup-and-Restore.md)，并在第二批增加导出预警或文件存储适配器。
 3. 掌握度后台评估使用进程内队列，重启时不能保证重放；练习记录会先持久化，第二批再做可恢复任务。
 4. 不同视觉 Provider 的公式、手写和长答表现不同，低置信度和主观题仍需人工复核。
+5. 二维码依赖手机可访问的 Mac 局域网地址和同一网络连通性；当前只提供试卷级身份，不承诺浏览器分页产生的每张物理页都有独立二维码。
 
 ## 8. 发布前外部待办
 
@@ -96,9 +100,9 @@
 
 | 命令 | 结果 |
 | --- | --- |
-| `npm_config_registry=https://registry.npmjs.org RUST_LOG=info TELEMETRY_DISABLED=false bash scripts/ci.sh` | 通过：依赖、Prisma、lint、309 个 Vitest 文件/4110 个用例、10 个 publication 用例、公开历史、脚本语法、TypeScript 与生产构建 |
-| `npm run test:e2e` | 通过：96/96 Chromium，0 unexpected、0 flaky、0 skipped，耗时约 3.3 分钟 |
-| `python3 scripts/check-public-history.py HEAD` | 通过：公开基线之后 12255 个可达对象及全历史私有路径检查通过 |
+| `npm_config_registry=https://registry.npmjs.org RUST_LOG=info TELEMETRY_DISABLED=false bash scripts/ci.sh` | 通过：依赖、Prisma、lint、314 个 Vitest 文件/4143 个用例、11 个 publication 用例、公开历史、脚本语法、TypeScript 与生产构建 |
+| `npm run test:e2e` | 通过：97/97 Chromium，0 unexpected、0 flaky、0 skipped，耗时约 3.3 分钟 |
+| `python3 scripts/check-public-history.py HEAD` | 通过：公开基线之后 12381 个可达对象及全历史私有路径检查通过 |
 | `rg -n "npmmirror" package-lock.json` | 通过：无输出，锁文件未引用该镜像 |
 | 业务 Schema、迁移和备份实现差异检查 | 通过：无输出 |
 
@@ -106,14 +110,14 @@
 
 | 项目 | 值 |
 | --- | --- |
-| 被验收提交 | `c3cd92386b159e2f1800c5185c481b4f5dd72217` |
+| 被验收提交 | `1ae05471e6c0a23c7da079867b59ed63cfbdcc46` |
 | Next.js | 16.4.3 → 16.4.6 |
 | 系统 | macOS 15.8.1（Build 24H32），Apple Silicon |
 | Node.js | v26.9.0 |
 | npm | 11.19.1 |
 | Python | 3.13.5 |
-| Playwright 报告 | `/var/folders/hm/1zxwv_s97n37fv5w06g9qzj80000gn/T/wrong-notebook-e2e-IIZpNo/report` |
+| Playwright 报告 | `/var/folders/hm/1zxwv_s97n37fv5w06g9qzj80000gn/T/wrong-notebook-e2e-vbbn16/report` |
 
 完整 CI 的生产构建退出 0；Turbopack 对 `src/lib/background-tasks.ts` 的动态文件读取保留一条既有跟踪范围警告，不影响本次构建，但可在第二批独立评估打包体积。报告自身的结果提交不作为自引用“最终 SHA”；上表锚定的是写入结果前已通过门禁的提交。
 
-任务 06 最终门禁曾由 Next.js 16.4.3 的新安全公告中止；本次使用官方 security 升级器确认同主版本修复目标为 16.4.6，依赖树、锁文件官方 registry、完整 CI 与 96 项 Chromium E2E 均重新验证通过。该结论仅覆盖本地分支，不能替代推送后的远端 CI、真实家庭样本验收或 SignPath 生产签名。
+任务 06 最终门禁曾由 Next.js 16.4.3 的新安全公告中止；本次沿用已验证的 16.4.6，并在任务 07 增加试卷级二维码、稳定短码和扫码回传后，再次通过依赖树、锁文件官方 registry、完整 CI 与 97 项 Chromium E2E。该结论仅覆盖本地分支，不能替代推送后的远端 CI、真实家庭样本验收或 SignPath 生产签名。

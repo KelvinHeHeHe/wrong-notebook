@@ -1,7 +1,7 @@
 # 家庭考试与纸质回传数据模型
 
 > 状态：已实现。
-> 数据源：当前 `prisma/schema.prisma`、正式迁移和备份 v13。
+> 数据源：当前 `prisma/schema.prisma`、正式迁移和备份 v14。
 > 原则：复用 `ExamPaper` / `ExamQuestion`，只做兼容旧数据的增量迁移。
 
 ## 1. 当前关系
@@ -34,6 +34,7 @@ PracticeRecord.examAttemptId ──(写入侧校验)──> ExamAttempt.id
 | `examDate` | `DateTime?` | 考试日期 |
 | `totalScore` | `Float?` | 标称满分 |
 | `sourceFileName` | `String?` | 原始文件名，用于本地追溯 |
+| `printCode` | `String? @unique` | 8 位 Base58 稳定打印短码；旧卷首次读取时惰性补齐 |
 
 关系：`pages ExamPaperPage[]`、`attempts ExamAttempt[]`。`subjectId` 当前是快照列而非 Prisma 外键，以避免重建旧 SQLite 表；服务层负责校验用户与学科归属。索引为 `@@index([userId, createdAt])` 和 `@@index([subjectId])`。
 
@@ -127,15 +128,23 @@ uploaded → recognizing → review → confirmed
 - 为 `ExamAttemptPage` 增加可空 `recognitionResult TEXT`。
 - 旧作答页升级后该值为 `null`。
 
+### `20261117180000_add_exam_print_code`
+
+- 为 `ExamPaper` 增加可空且唯一的 `printCode TEXT`，并建立唯一索引。
+- 保持字段可空以避免重建旧 SQLite 表；新建、导入和恢复试卷立即分配短码，旧试卷在读取详情或打印身份时惰性补齐。
+- 短码只定位试卷，不承担授权；扫码解析仍按登录用户隔离。
+- 12 位打印版次由可打印内容的 SHA-256 指纹派生，不保存为数据库列，避免内容变更后手工同步计数。
+
 任务 06 的迁移特征测试在 `20261105135634_add_telemetry_tables` 处建立近端旧库，写入用户、学科、错题、旧试卷、题目和练习记录，再部署全部正式迁移，验证旧行保留、新集合为空、默认值和约束正确、重复部署幂等。测试只操作系统临时 SQLite。
 
 ## 6. 备份兼容
 
 | 格式 | 考试数据能力 | 当前导入行为 |
 | --- | --- | --- |
-| v11 | 旧试卷/题目，不含新页面和作答集合 | 缺省 `origin='generated'`，新集合为空；可再导出为 v13 |
-| v12 | 引入试卷元数据、页面、作答、逐题评分和 `examAttemptId` | 缺失 `recognitionResult` 时规范化为 `null`；可再导出为 v13 |
-| v13 | 增加作答页级识别候选 | 当前完整往返格式 |
+| v11 | 旧试卷/题目，不含新页面和作答集合 | 缺省 `origin='generated'`，新集合为空；生成短码后可再导出为 v14 |
+| v12 | 引入试卷元数据、页面、作答、逐题评分和 `examAttemptId` | 缺失 `recognitionResult` 时规范化为 `null`；生成短码后可再导出为 v14 |
+| v13 | 增加作答页级识别候选 | 保留完整考试数据并生成短码，可再导出为 v14 |
+| v14 | `ExamPaper` 增加稳定打印短码 | 当前完整往返格式；合法短码优先保留，冲突时为导入卷生成新码 |
 
 导入顺序保证依赖先于引用：用户/学科 → 试卷/题目 → 页/作答 → 作答页/逐题评分 → 练习记录。旧 ID 经现有映射重写；跨用户、跨试卷关联被跳过或拒绝。图片 data URL 与识别候选随本地 JSON 备份导出。
 
