@@ -618,7 +618,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(question.paperId).toBe(attempt.paperId);
     });
 
-    it('v11 备份缺少新字段和集合时按 generated 试卷恢复', async () => {
+    it('v11 备份恢复 generated 试卷并按 v13 再导出', async () => {
         await database.examPaper.create({
             data: {
                 id: 'paper-v11', userId: 'user-1', title: '旧版试卷', status: 'ready', scope: 'all', difficulty: 'medium',
@@ -657,6 +657,15 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(await database.examAttempt.count()).toBe(0);
         expect(await database.examAttemptPage.count()).toBe(0);
         expect(await database.examAttemptAnswer.count()).toBe(0);
+
+        const reexported = await exportBackup();
+        expect(reexported.version).toBe(13);
+        expect(reexported.examPapers.find((paper: { title: string }) => paper.title === '旧版试卷'))
+            .toMatchObject({ title: '旧版试卷', origin: 'generated' });
+        expect(reexported.examPaperPages).toEqual([]);
+        expect(reexported.examAttempts).toEqual([]);
+        expect(reexported.examAttemptPages).toEqual([]);
+        expect(reexported.examAttemptAnswers).toEqual([]);
     });
 
     it('遥测记录与协议、遥测设置属于实例数据，不进入备份', async () => {
