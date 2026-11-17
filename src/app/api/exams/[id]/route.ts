@@ -13,6 +13,7 @@ import { validateImportedExamForPublish } from "@/lib/exam/exam-import";
 import { withUser } from "@/lib/api-handler";
 import type { AuthenticatedContext } from "@/lib/api-handler";
 import { updateImportedExamSchema } from "@/lib/schemas/exam";
+import { createExamPrintVersion, ensureExamPrintCode } from "@/lib/exam/exam-print-identity";
 
 const logger = createLogger('api:exams:id');
 
@@ -60,11 +61,12 @@ export const GET = withUser(async (
     try {
         const ownedPaper = await prisma.examPaper.findUnique({
             where: { id },
-            select: { userId: true },
+            select: { userId: true, printCode: true },
         });
         if (!ownedPaper || ownedPaper.userId !== user.id) {
             return notFound("Exam paper not found");
         }
+        const printCode = ownedPaper.printCode ?? await ensureExamPrintCode(prisma, id);
 
         const paper = await prisma.examPaper.findUnique({
             where: { id },
@@ -93,8 +95,15 @@ export const GET = withUser(async (
         }
 
         const { userId: _userId, questions, ...rest } = paper;
+        const printVersion = createExamPrintVersion({
+            title: paper.title,
+            groupByType: paper.groupByType,
+            questions,
+        });
         return NextResponse.json({
             ...rest,
+            printCode,
+            printVersion,
             ...(pages ? { pages } : {}),
             questions: questions.map(({ errorItem, practiceRecords, ...question }) => ({
                 ...question,

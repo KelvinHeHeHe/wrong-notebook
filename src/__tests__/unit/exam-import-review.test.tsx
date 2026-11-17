@@ -31,6 +31,8 @@ const region = { x: 0.1, y: 0.1, width: 0.8, height: 0.3 };
 function paperFixture(twoQuestions = false): ExamPaperDetail {
     return {
         id: 'paper-1',
+    printCode: 'Ab3xYz91',
+    printVersion: 'abcdef123456',
         title: '家庭周测',
         status: 'review',
         scope: 'all',

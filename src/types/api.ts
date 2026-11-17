@@ -549,6 +549,10 @@ export interface ExamPaperDetail {
     examDate?: string | null;
     totalScore?: number | null;
     sourceFileName?: string | null;
+    /** 打印稿稳定短码；用于纸面抄录与扫码定位，不作为授权凭据。 */
+    printCode: string;
+    /** 当前可打印内容的 12 位 SHA-256 指纹。 */
+    printVersion: string;
     pages?: ExamPaperPageDetail[];
 }
 

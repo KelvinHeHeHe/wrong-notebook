@@ -217,6 +217,7 @@ describe('外部整卷草稿与页面 API', () => {
         }]);
         mocks.examPaper.findUnique.mockResolvedValue({
             id: 'paper-1', userId: 'user-1', title: '导入卷', status: 'review', origin: 'imported',
+            printCode: 'Ab3xYz91', groupByType: false,
             questions: [{
                 id: 'question-1', order: 1, status: 'ready', externalNumber: '1', pageNumber: 1,
                 regionJson: '[{"x":0,"y":0,"width":1,"height":0.5}]', recognitionConfidence: null,

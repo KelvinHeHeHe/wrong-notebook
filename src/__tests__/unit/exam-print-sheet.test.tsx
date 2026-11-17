@@ -9,6 +9,8 @@ const render = (element: React.ReactElement) => renderToStaticMarkup(<LanguagePr
 function buildPaper(questions: Partial<ExamPaperDetail['questions'][number]>[]): ExamPaperDetail {
     return {
         id: 'p1',
+    printCode: 'Ab3xYz91',
+    printVersion: 'abcdef123456',
         title: '周测',
         status: 'ready',
         scope: 'all',
