@@ -2,7 +2,7 @@
 
 > 验收日期：2026-11-17
 > 范围：任务 02～06，本地发布前门禁
-> 状态：验证待执行
+> 状态：本地功能门禁通过；正式发布前需处理 Next.js 安全升级待办
 
 ## 1. 验收口径
 
@@ -16,17 +16,17 @@
 
 | 用户步骤/边界 | 自动化证据 | 验收重点 | 结果 |
 | --- | --- | --- | --- |
-| 照片整卷导入 | `e2e/exam-import.spec.ts` | 两页照片、部分失败、单页重试、校对发布 | 待执行 |
-| PDF 整卷输入 | `src/__tests__/unit/exam-import-client.test.ts`、`e2e/file-import-pdf.spec.ts` | 全页渲染、扫描页、页数/范围限制、异常 PDF | 待执行 |
-| 发布与打印 | `e2e/exam-import.spec.ts` | 发布后复用现有详情、打印 6 题 | 待执行 |
-| 导入卷进入纸质回传 | `e2e/exam-import.spec.ts` | 真实 `paperId` 打开 `/exams/:id/attempts/new`，标题与上传控件正确 | 待执行 |
-| 打印卷拍照回传 | `e2e/exam-attempt.spec.ts` | 桌面/手机、多页、部分失败、两阶段识别 | 待执行 |
-| 人工复核与部分分 | `e2e/exam-attempt.spec.ts`、作答复核集成测试 | 题目映射、识别候选、人工更正、低置信度复核 | 待执行 |
-| 确认入账 | `e2e/exam-attempt.spec.ts`、`exam-attempt-confirm.test.ts` | 事务、幂等、错题/练习记录、掌握度触发 | 待执行 |
-| 成绩趋势与详情 | `e2e/exam-attempt.spec.ts`、`exam-trends` 单元/集成测试 | 仅 confirmed、得分率、时区、详情跳转 | 待执行 |
-| v13 导出与空账号恢复 | `e2e/exam-attempt.spec.ts`、`data-backup.test.ts` | 页图、识别候选、逐题评分、同日双作答和关联练习记录 | 待执行 |
-| AI 外发授权 | `e2e/auth-flow.spec.ts`、`ai-consent.test.ts`、作答识别 SQLite 测试 | 未授权拒绝、用户 Provider 配置、本地模拟模型 | 待执行 |
-| 新库和旧库升级 | `database-migrations.test.ts` | 全新库、近端旧库、约束、幂等部署 | 待执行 |
+| 照片整卷导入 | `e2e/exam-import.spec.ts` | 两页照片、部分失败、单页重试、校对发布 | 通过 |
+| PDF 整卷输入 | `src/__tests__/unit/exam-import-client.test.ts`、`e2e/file-import-pdf.spec.ts` | 全页渲染、扫描页、页数/范围限制、异常 PDF | 通过 |
+| 发布与打印 | `e2e/exam-import.spec.ts` | 发布后复用现有详情、打印 6 题 | 通过 |
+| 导入卷进入纸质回传 | `e2e/exam-import.spec.ts` | 真实 `paperId` 打开 `/exams/:id/attempts/new`，标题与上传控件正确 | 通过 |
+| 打印卷拍照回传 | `e2e/exam-attempt.spec.ts` | 桌面/手机、多页、部分失败、两阶段识别 | 通过 |
+| 人工复核与部分分 | `e2e/exam-attempt.spec.ts`、作答复核集成测试 | 题目映射、识别候选、人工更正、低置信度复核 | 通过 |
+| 确认入账 | `e2e/exam-attempt.spec.ts`、`exam-attempt-confirm.test.ts` | 事务、幂等、错题/练习记录、掌握度触发 | 通过 |
+| 成绩趋势与详情 | `e2e/exam-attempt.spec.ts`、`exam-trends` 单元/集成测试 | 仅 confirmed、得分率、时区、详情跳转 | 通过 |
+| v13 导出与空账号恢复 | `e2e/exam-attempt.spec.ts`、`data-backup.test.ts` | 页图、识别候选、逐题评分、同日双作答和关联练习记录 | 通过 |
+| AI 外发授权 | `e2e/auth-flow.spec.ts`、`ai-consent.test.ts`、作答识别 SQLite 测试 | 未授权拒绝、用户 Provider 配置、本地模拟模型 | 通过 |
+| 新库和旧库升级 | `database-migrations.test.ts` | 全新库、近端旧库、约束、幂等部署 | 通过 |
 
 ## 3. SQLite 迁移验收
 
@@ -34,7 +34,7 @@
 
 迁移集成测试在系统临时目录创建空 SQLite，部署全部正式迁移并检查 Prisma 模型、外键、唯一索引、查询索引和第二次部署幂等。测试不读取或覆盖 `prisma/dev.db`。
 
-结果：待执行。
+结果：通过。迁移文件测试共 6/6 通过，包含全新库部署、Schema 差异和第二次部署幂等检查。
 
 ### 3.2 考试 MVP 前近端旧库
 
@@ -46,15 +46,15 @@
 - `ExamPaperPage`、`ExamAttempt`、`ExamAttemptPage`、`ExamAttemptAnswer` 存在且为空；
 - 外键与索引正确，第二次部署无待执行迁移。
 
-结果：待执行。
+结果：通过。断点快照、默认值、四个空集合、外键/索引和重复部署断言全部通过。
 
 ## 4. 备份兼容矩阵
 
 | 输入格式 | 当前恢复与再导出契约 | 结果 |
 | --- | --- | --- |
-| v11 | 旧试卷恢复为 `generated`，四个新集合为空，再导出为 v13 | 待执行 |
-| v12 | 作答页缺失的 `recognitionResult` 规范化为 `null`，再导出为 v13 | 待执行 |
-| v13 | 元数据、页图、识别候选、独立作答、逐题评分和练习关联完整往返 | 待执行 |
+| v11 | 旧试卷恢复为 `generated`，四个新集合为空，再导出为 v13 | 通过 |
+| v12 | 作答页缺失的 `recognitionResult` 规范化为 `null`，再导出为 v13 | 通过 |
+| v13 | 元数据、页图、识别候选、独立作答、逐题评分和练习关联完整往返 | 通过 |
 
 真实 SQLite 集成测试还覆盖重复导入幂等、同日两次作答保留、跨用户/跨试卷关联隔离和事务回滚。
 
@@ -86,6 +86,7 @@
 
 - 当前工作区没有 `../wrong-notebook-github-pages`，正式发布前需在官网仓库同步中英文功能说明并单独提交。
 - Windows 生产签名依赖 SignPath 生产证书和维护者人工批准；本任务只验证签名检查逻辑，不生成生产签名包。
+- 最终门禁重跑时，Next.js 16.4.3 在构建完成后显示已知安全漏洞的一次性升级提示并要求重跑。任务 06 不擅自改变依赖；正式发布前应在独立工作树运行官方 `next upgrade --agent=security` 流程，完整复测后再发布。
 - 完成三学科、1～6 年级的脱敏家庭样本验收，记录识别、题号匹配和客观题判定指标。
 - 若用户决定推送本分支，再以 GitHub Actions 结果补充远端证据；本地收口不自动推送。
 
@@ -93,10 +94,23 @@
 
 | 命令 | 结果 |
 | --- | --- |
-| `npm_config_registry=https://registry.npmjs.org RUST_LOG=info TELEMETRY_DISABLED=false bash scripts/ci.sh` | 待执行 |
-| `npm run test:e2e` | 待执行 |
-| `python3 scripts/check-public-history.py HEAD` | 待执行 |
-| `rg -n "npmmirror" package-lock.json` | 待执行；预期无输出 |
-| 业务 Schema、迁移和备份实现差异检查 | 待执行；预期无输出 |
+| `npm_config_registry=https://registry.npmjs.org RUST_LOG=info TELEMETRY_DISABLED=false bash scripts/ci.sh` | 通过：依赖、Prisma、lint、309 个 Vitest 文件/4110 个用例、10 个 publication 用例、公开历史、脚本语法、TypeScript 与生产构建 |
+| `npm run test:e2e` | 通过：96/96 Chromium，0 unexpected、0 flaky、0 skipped，耗时约 3.3 分钟 |
+| `python3 scripts/check-public-history.py HEAD` | 通过：公开基线之后 12223 个可达对象及全历史私有路径检查通过 |
+| `rg -n "npmmirror" package-lock.json` | 通过：无输出，锁文件未引用该镜像 |
+| 业务 Schema、迁移和备份实现差异检查 | 通过：无输出 |
 
-被验收提交、系统版本、Node/npm/Python 版本、测试数量和 Playwright 报告路径将在上述命令完成后写入本报告。报告结果更新前的提交作为可复现锚点，避免把报告自身提交写成自引用的“最终 SHA”。
+### 9.1 可复现环境
+
+| 项目 | 值 |
+| --- | --- |
+| 被验收提交 | `b94070fc3fb898b4ee58130c452fae5733bd3062` |
+| 系统 | macOS 15.8.1（Build 24H32），Apple Silicon |
+| Node.js | v26.9.0 |
+| npm | 11.19.1 |
+| Python | 3.13.5 |
+| Playwright 报告 | `/var/folders/hm/1zxwv_s97n37fv5w06g9qzj80000gn/T/wrong-notebook-e2e-crWK7j/report` |
+
+完整 CI 的生产构建退出 0；Turbopack 对 `src/lib/background-tasks.ts` 的动态文件读取保留一条既有跟踪范围警告，不影响本次构建，但可在第二批独立评估打包体积。报告自身的结果提交不作为自引用“最终 SHA”；上表锚定的是写入结果前已通过门禁的提交。
+
+最终证据提交后的第一次门禁重跑，Next.js 在构建产物生成完成后因新获取的安全公告主动退出 1，并明确要求重跑相同命令；这次中止未计为通过。按提示重跑后的最终结果记录在本任务账本中，但“构建可继续”不代表漏洞已修复，安全升级仍是正式发布阻断项。
