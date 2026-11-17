@@ -623,7 +623,9 @@ describe('数据导出后再导入（真实 SQLite）', () => {
             data: {
                 id: 'paper-v11', userId: 'user-1', title: '旧版试卷', status: 'ready', scope: 'all', difficulty: 'medium',
                 requestedCount: 1, subjectIds: '[]',
-                questions: { create: [{ id: 'question-v11', order: 0, sourceShortId: 'V11001', status: 'ready' }] },
+                questions: { create: [{
+                    id: 'question-v11', order: 0, sourceShortId: 'V11001', status: 'ready', questionText: '旧版题干',
+                }] },
             },
         });
         const backup = await exportBackup();
@@ -661,7 +663,11 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         const reexported = await exportBackup();
         expect(reexported.version).toBe(13);
         expect(reexported.examPapers.find((paper: { title: string }) => paper.title === '旧版试卷'))
-            .toMatchObject({ title: '旧版试卷', origin: 'generated' });
+            .toMatchObject({
+                title: '旧版试卷',
+                origin: 'generated',
+                questions: [{ order: 0, questionText: '旧版题干', sourceShortId: 'V11001' }],
+            });
         expect(reexported.examPaperPages).toEqual([]);
         expect(reexported.examAttempts).toEqual([]);
         expect(reexported.examAttemptPages).toEqual([]);
