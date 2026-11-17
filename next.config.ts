@@ -25,6 +25,9 @@ export function aiAccountExtensionPath(value = process.env.AI_ACCOUNT_EXTENSION)
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  experimental: {
+    agentUpgrade: 'security',
+  },
   turbopack: {
     resolveAlias: {
       '@wrong-notebook/ai-account': aiAccountExtensionPath(),
