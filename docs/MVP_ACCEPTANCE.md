@@ -2,7 +2,7 @@
 
 > 验收日期：2026-11-17
 > 范围：任务 02～06，本地发布前门禁
-> 状态：本地功能门禁通过；正式发布前需处理 Next.js 安全升级待办
+> 状态：本地功能与 Next.js 安全升级门禁通过；正式发布仍待远端 CI 和外部验收
 
 ## 1. 验收口径
 
@@ -74,6 +74,7 @@
 - 任务 04：纸质回传、页级识别候选、逐题复核、幂等确认和学习历史入账。
 - 任务 05：已确认考试的成绩趋势、筛选、摘要和详情跳转。
 - 任务 06：近端迁移、v11 再导出、导入卷回传入口和维护者验收文档。
+- 发布门禁安全升级：按官方 security 升级器结论，将 Next.js 16.4.3 升级到 16.4.6，并启用 `experimental.agentUpgrade='security'`。
 - 当前备份格式 v13，兼容导入 v11/v12；旧生成试卷和旧练习记录保留。
 
 ## 7. 已知限制
@@ -87,7 +88,7 @@
 
 - 当前工作区没有 `../wrong-notebook-github-pages`，正式发布前需在官网仓库同步中英文功能说明并单独提交。
 - Windows 生产签名依赖 SignPath 生产证书和维护者人工批准；本任务只验证签名检查逻辑，不生成生产签名包。
-- 最终门禁重跑时，Next.js 16.4.3 在构建完成后显示已知安全漏洞的一次性升级提示并要求重跑。任务 06 不擅自改变依赖；正式发布前应在独立工作树运行官方 `next upgrade --agent=security` 流程，完整复测后再发布。
+- Next.js 安全升级已在独立工作树按官方 `next upgrade --agent=security` 结论完成：16.4.3 → 16.4.6，本地完整 CI 和 E2E 已复测通过；正式发布仍需以推送后的 GitHub Actions 结果补充远端证据。
 - 完成三学科、1～6 年级的脱敏家庭样本验收，记录识别、题号匹配和客观题判定指标。
 - 若用户决定推送本分支，再以 GitHub Actions 结果补充远端证据；本地收口不自动推送。
 
@@ -97,7 +98,7 @@
 | --- | --- |
 | `npm_config_registry=https://registry.npmjs.org RUST_LOG=info TELEMETRY_DISABLED=false bash scripts/ci.sh` | 通过：依赖、Prisma、lint、309 个 Vitest 文件/4110 个用例、10 个 publication 用例、公开历史、脚本语法、TypeScript 与生产构建 |
 | `npm run test:e2e` | 通过：96/96 Chromium，0 unexpected、0 flaky、0 skipped，耗时约 3.3 分钟 |
-| `python3 scripts/check-public-history.py HEAD` | 通过：公开基线之后 12223 个可达对象及全历史私有路径检查通过 |
+| `python3 scripts/check-public-history.py HEAD` | 通过：公开基线之后 12255 个可达对象及全历史私有路径检查通过 |
 | `rg -n "npmmirror" package-lock.json` | 通过：无输出，锁文件未引用该镜像 |
 | 业务 Schema、迁移和备份实现差异检查 | 通过：无输出 |
 
@@ -105,13 +106,14 @@
 
 | 项目 | 值 |
 | --- | --- |
-| 被验收提交 | `b94070fc3fb898b4ee58130c452fae5733bd3062` |
+| 被验收提交 | `c3cd92386b159e2f1800c5185c481b4f5dd72217` |
+| Next.js | 16.4.3 → 16.4.6 |
 | 系统 | macOS 15.8.1（Build 24H32），Apple Silicon |
 | Node.js | v26.9.0 |
 | npm | 11.19.1 |
 | Python | 3.13.5 |
-| Playwright 报告 | `/var/folders/hm/1zxwv_s97n37fv5w06g9qzj80000gn/T/wrong-notebook-e2e-crWK7j/report` |
+| Playwright 报告 | `/var/folders/hm/1zxwv_s97n37fv5w06g9qzj80000gn/T/wrong-notebook-e2e-IIZpNo/report` |
 
 完整 CI 的生产构建退出 0；Turbopack 对 `src/lib/background-tasks.ts` 的动态文件读取保留一条既有跟踪范围警告，不影响本次构建，但可在第二批独立评估打包体积。报告自身的结果提交不作为自引用“最终 SHA”；上表锚定的是写入结果前已通过门禁的提交。
 
-最终证据提交后的第一次门禁重跑，Next.js 在构建产物生成完成后因新获取的安全公告主动退出 1，并明确要求重跑相同命令；这次中止未计为通过。按提示重跑后的最终结果记录在本任务账本中，但“构建可继续”不代表漏洞已修复，安全升级仍是正式发布阻断项。
+任务 06 最终门禁曾由 Next.js 16.4.3 的新安全公告中止；本次使用官方 security 升级器确认同主版本修复目标为 16.4.6，依赖树、锁文件官方 registry、完整 CI 与 96 项 Chromium E2E 均重新验证通过。该结论仅覆盖本地分支，不能替代推送后的远端 CI、真实家庭样本验收或 SignPath 生产签名。
