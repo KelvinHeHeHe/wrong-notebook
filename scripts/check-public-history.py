@@ -28,6 +28,11 @@ EXAMPLE_ADDRESSES = {
         "packaging/android/app/src/main/res/values/strings.xml",
         "packaging/android/app/src/main/res/values-zh/strings.xml",
     },
+    ".".join(("192", "168", "1", "8")): {
+        "src/app/exams/[id]/print/page.tsx",
+        "src/__tests__/unit/exam-print-sheet.test.tsx",
+        "src/__tests__/unit/print-access-url.test.ts",
+    },
 }
 IPV4 = re.compile(rb"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])")
 PRIVATE_MARKERS = (

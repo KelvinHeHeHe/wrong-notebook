@@ -41,6 +41,16 @@ class PublicHistoryTests(unittest.TestCase):
         result = self.check()
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_reviewed_print_address_is_allowed_only_in_listed_files(self):
+        address = ".".join(("192", "168", "1", "8"))
+        self.commit("src/app/exams/[id]/print/page.tsx", f'placeholder="http://{address}:3000"\n')
+        self.assertEqual(self.check().returncode, 0)
+
+        self.commit("README.md", f"http://{address}:3000\n")
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("内网地址", result.stderr)
+
     def test_shallow_clone_cannot_bypass_historical_checks(self):
         with tempfile.TemporaryDirectory() as temporary:
             clone = Path(temporary) / "shallow"

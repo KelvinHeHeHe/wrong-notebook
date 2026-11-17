@@ -6,7 +6,7 @@ import { openSettings } from './support/flows';
 import { expect, runState, test } from './support/fixtures';
 
 for (const mobile of [false, true]) {
-    test(`[E2E-PAPER-RETURN] ${mobile ? '手机' : '桌面'}两页部分失败、复核确认与 v13 备份恢复`, async ({ page, scenario }) => {
+    test(`[E2E-PAPER-RETURN] ${mobile ? '手机' : '桌面'}两页部分失败、复核确认与 v14 备份恢复`, async ({ page, scenario }) => {
         test.setTimeout(150000);
         if (mobile) await page.setViewportSize({ width: 390, height: 844 });
         const linked = await scenario.item('A', { questionType: 'solution', masteryProbability: 0.2, masteryEvaluatedAt: new Date() });
@@ -176,7 +176,7 @@ for (const mobile of [false, true]) {
         const file = join(runState.reportDir, `${scenario.id}-paper-return.json`);
         await (await downloaded).saveAs(file);
         const contents = readFileSync(file, 'utf8');
-        expect(JSON.parse(contents).version).toBe(13);
+        expect(JSON.parse(contents).version).toBe(14);
         expect(contents).not.toContain('e2e-dummy-key');
         await scenario.resetCurrentAccount();
         await scenario.login(page);
