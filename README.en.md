@@ -618,6 +618,10 @@ For usage, deployment and FAQ, see the [Wiki in English](https://github.com/marg
 | [release-guide.md](doc/release-guide.md) | Releasing |
 | [BRANCH_WORKFLOW.md](doc/BRANCH_WORKFLOW.md) | Public mainline and pre-push checks |
 | [setup-wsl-network.md](doc/setup-wsl-network.md) | WSL networking |
+| [PROJECT_AUDIT.md](docs/PROJECT_AUDIT.md) | Source audit and reuse matrix for the family exam MVP (Chinese maintainer document) |
+| [MVP_PLAN.md](docs/MVP_PLAN.md) | Implementation status and follow-up plan for the family exam MVP (Chinese maintainer document) |
+| [DATA_MODEL.md](docs/DATA_MODEL.md) | Family exam and paper-return data model (Chinese maintainer document) |
+| [MVP_ACCEPTANCE.md](docs/MVP_ACCEPTANCE.md) | Segmented acceptance evidence and pre-release gates (Chinese maintainer document) |
 
 ## 💬 Community and contributing
 

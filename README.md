@@ -616,6 +616,10 @@ E2E 启动器会在系统临时目录复制应用和依赖、执行正式迁移�
 | [release-guide.md](doc/release-guide.md) | 版本发布 |
 | [BRANCH_WORKFLOW.md](doc/BRANCH_WORKFLOW.md) | 公开主线与上传前检查 |
 | [setup-wsl-network.md](doc/setup-wsl-network.md) | WSL 网络配置 |
+| [PROJECT_AUDIT.md](docs/PROJECT_AUDIT.md) | 家庭考试 MVP 源码审计与功能复用矩阵（中文维护者文档） |
+| [MVP_PLAN.md](docs/MVP_PLAN.md) | 家庭考试 MVP 实施状态与后续计划（中文维护者文档） |
+| [DATA_MODEL.md](docs/DATA_MODEL.md) | 家庭考试与纸质回传数据模型（中文维护者文档） |
+| [MVP_ACCEPTANCE.md](docs/MVP_ACCEPTANCE.md) | 家庭考试 MVP 分段验收证据与发布前门禁（中文维护者文档） |
 
 ## 💬 交流与贡献
 
