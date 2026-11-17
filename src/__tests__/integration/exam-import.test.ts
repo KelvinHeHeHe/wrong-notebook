@@ -94,6 +94,7 @@ describe('外部整卷草稿与页面 API', () => {
             subjectId: 'subject-1',
             subjectIds: '["subject-1"]',
             status: 'importing',
+            printCode: expect.stringMatching(/^[1-9A-HJ-NP-Za-km-z]{8}$/),
         });
         expect(data.pages.create[0]).toMatchObject({
             order: 1,

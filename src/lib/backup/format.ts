@@ -11,7 +11,7 @@ import { z } from "zod";
  */
 
 /** 当前备份文件版本号 */
-export const BACKUP_VERSION = 13;
+export const BACKUP_VERSION = 14;
 
 /** 备份文件中的用户对象 */
 export interface BackupUser {
@@ -216,6 +216,8 @@ export interface BackupExamPaper {
     examDate?: string | Date | null;
     totalScore?: number | null;
     sourceFileName?: string | null;
+    /** version 14 起导出；旧版缺省时导入侧重新生成 */
+    printCode?: string | null;
     requestedCount: number;
     subjectIds: string;
     tagNames: string | null;

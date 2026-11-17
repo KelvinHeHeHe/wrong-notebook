@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { BACKUP_VERSION, parseBackupFile } from "@/lib/backup/format";
 
 describe("parseBackupFile", () => {
-    it("当前备份版本为 13", () => {
-        expect(BACKUP_VERSION).toBe(13);
+    it("当前备份版本为 14", () => {
+        expect(BACKUP_VERSION).toBe(14);
     });
 
     it.each([

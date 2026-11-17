@@ -109,6 +109,7 @@ describe('/api/exams', () => {
             expect(where).toMatchObject({ userId: 'user-1', subjectId: { in: ['s1'] }, NOT: { masteryProbability: { gte: 0.5 } } });
             const created = mocks.examPaper.create.mock.calls[0][0].data;
             expect(created.questions.create).toHaveLength(2);
+            expect(created.printCode).toMatch(/^[1-9A-HJ-NP-Za-km-z]{8}$/);
             for (const question of created.questions.create) {
                 expect(['AAAAAA', 'BBBBBB', 'CCCCCC']).toContain(question.sourceShortId);
             }

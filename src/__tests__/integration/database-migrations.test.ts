@@ -84,7 +84,7 @@ function expectConstraints() {
     expect(database!.prepare('PRAGMA index_list("PracticeRecord")').all().map((index) => index.name))
         .toEqual(expect.arrayContaining(['PracticeRecord_examAttemptId_idx', 'PracticeRecord_examAttemptId_examQuestionId_key']));
     expect(database!.prepare('PRAGMA index_list("ExamPaper")').all().map((index) => index.name))
-        .toContain('ExamPaper_subjectId_idx');
+        .toEqual(expect.arrayContaining(['ExamPaper_subjectId_idx', 'ExamPaper_printCode_key']));
     expect(database!.prepare('PRAGMA index_list("ExamPaperPage")').all().map((index) => index.name))
         .toEqual(expect.arrayContaining(['ExamPaperPage_paperId_role_order_key', 'ExamPaperPage_paperId_order_idx']));
     expect(database!.prepare('PRAGMA index_list("ExamAttempt")').all().map((index) => index.name))
@@ -156,6 +156,7 @@ describe('真实 Prisma 数据库迁移', () => {
                 expect.objectContaining({ name: 'examDate', notnull: 0, dflt_value: null }),
                 expect.objectContaining({ name: 'totalScore', notnull: 0, dflt_value: null }),
                 expect.objectContaining({ name: 'sourceFileName', notnull: 0, dflt_value: null }),
+                expect.objectContaining({ name: 'printCode', notnull: 0, dflt_value: null }),
             ]));
         expect(database!.prepare('PRAGMA table_info("PracticeRecord")').all())
             .toContainEqual(expect.objectContaining({ name: 'examAttemptId', notnull: 0, dflt_value: null }));
@@ -211,6 +212,7 @@ describe('真实 Prisma 数据库迁移', () => {
             examDate: null,
             totalScore: null,
             sourceFileName: null,
+            printCode: null,
         })));
         expect(rows('ExamQuestion')).toEqual(before.ExamQuestion.map((row) => ({
             ...row,
@@ -287,6 +289,7 @@ describe('真实 Prisma 数据库迁移', () => {
                 examDate: null,
                 totalScore: null,
                 sourceFileName: null,
+                printCode: null,
             };
             return row;
         }));

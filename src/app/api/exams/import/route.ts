@@ -4,6 +4,7 @@ import { conflict, internalError, validationError } from '@/lib/api-errors';
 import { withUser } from '@/lib/api-handler';
 import type { AuthenticatedContext } from '@/lib/api-handler';
 import { ExamPageImageError, validateExamPageImages } from '@/lib/exam/exam-page-image';
+import { generateUniqueExamPrintCode } from '@/lib/exam/exam-print-identity';
 import { createLogger } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import { createImportedExamSchema } from '@/lib/schemas/exam';
@@ -34,6 +35,7 @@ export const POST = withUser(async (req: Request, { user }: AuthenticatedContext
             return conflict('EXAM_PAGE_DUPLICATE');
         }
 
+        const printCode = await generateUniqueExamPrintCode(prisma);
         const paper = await prisma.$transaction((tx) => tx.examPaper.create({
             data: {
                 userId: user.id,
@@ -51,6 +53,7 @@ export const POST = withUser(async (req: Request, { user }: AuthenticatedContext
                 examDate: input.examDate ? new Date(input.examDate) : null,
                 totalScore: input.totalScore ?? null,
                 sourceFileName: input.sourceFileName ?? null,
+                printCode,
                 pages: {
                     create: pages.map(({ imageData, mimeType, width, height, order, role, checksum }) => ({
                         imageData, mimeType, width, height, order, role, checksum,

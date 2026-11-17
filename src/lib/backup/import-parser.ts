@@ -29,6 +29,7 @@ import { sanitizeSvgAnimation } from "@/lib/svg-animation";
 import { normalizeQuestionType } from "@/lib/question/question-type";
 import { EXAM_DIFFICULTIES, EXAM_MODES, EXAM_SCOPES } from "@/lib/exam/exam";
 import { isPracticeResult } from "@/lib/mastery";
+import { isExamPrintCode } from "@/lib/exam/exam-print-code";
 
 export type ImportData = ImportableBackupFile;
 
@@ -144,6 +145,7 @@ export interface NormalizedExamPaper {
     examDate: Date | undefined;
     totalScore: number | null;
     sourceFileName: string | null;
+    printCode: string | null;
 }
 
 /** 规范化的外部整卷页面 */
@@ -291,6 +293,7 @@ function normalizeExamPaper(paper: ImportedBackupExamPaper): NormalizedExamPaper
         examDate: safeParseDate(paper.examDate),
         totalScore: safeNonNegativeNumber(paper.totalScore),
         sourceFileName: safeNullableString(paper.sourceFileName),
+        printCode: isExamPrintCode(paper.printCode) ? paper.printCode : null,
     };
 }
 

@@ -87,6 +87,7 @@ export async function POST(req: Request) {
 
             logger.info({
                 userId: user.id,
+                backupVersion: body.version,
                 scope: importAll ? 'all' : merge && body.user.email !== user.email ? 'merge' : 'user',
                 ...stats,
             }, 'Data import completed');

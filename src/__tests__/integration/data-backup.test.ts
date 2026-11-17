@@ -225,9 +225,9 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(await database.knowledgeTag.count({ where: { name: '我的句式笔记' } })).toBe(1);
     });
 
-    it('导出文件使用第 13 版格式，包含 tagSet、试卷 mode、空的新考试集合与 extensions', async () => {
+    it('导出文件使用第 14 版格式，包含 tagSet、试卷 mode、空的新考试集合与 extensions', async () => {
         const backup = await exportBackup();
-        expect(backup.version).toBe(13);
+        expect(backup.version).toBe(14);
         expect(backup.extensions).toEqual({});
         expect(backup.examPaperPages).toEqual([]);
         expect(backup.examAttempts).toEqual([]);
@@ -255,14 +255,14 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         );
     });
 
-    it('v13 导出外部试卷元数据、页图、作答页与逐题评分', async () => {
+    it('v14 导出外部试卷元数据、打印短码、页图、作答页与逐题评分', async () => {
         await database.examPaper.create({
             data: {
                 id: 'paper-imported', userId: 'user-1', title: '三年级数学单元测验', status: 'ready',
                 scope: 'all', difficulty: 'original', mode: 'original', requestedCount: 1,
                 subjectIds: JSON.stringify(['math']), origin: 'imported', subjectId: 'math',
                 gradeSemester: '三年级上', examType: 'unit', examDate: new Date('2026-11-01T00:00:00Z'),
-                totalScore: 100, sourceFileName: 'unit-test.pdf',
+                totalScore: 100, sourceFileName: 'unit-test.pdf', printCode: 'Ab3xYz91',
                 questions: { create: [{
                     id: 'question-imported', order: 0, sourceShortId: 'IMP001', status: 'ready',
                     questionText: '1 + 2 = ?', answerText: '3', score: 5,
@@ -293,6 +293,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(backup.examPapers).toContainEqual(expect.objectContaining({
             id: 'paper-imported', origin: 'imported', subjectId: 'math', gradeSemester: '三年级上',
             examType: 'unit', examDate: '2026-11-01T00:00:00.000Z', totalScore: 100, sourceFileName: 'unit-test.pdf',
+            printCode: 'Ab3xYz91',
         }));
         expect(backup.examPapers.find((paper: { id: string }) => paper.id === 'paper-imported').questions[0]).toMatchObject({
             externalNumber: '1', pageNumber: 1, recognitionConfidence: 0.97,
@@ -416,7 +417,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
             checksum: 'attempt-roundtrip-sum', recognitionResult: expectedRecognitionResult,
         })]);
         const reexported = await exportBackup();
-        expect(reexported.version).toBe(13);
+        expect(reexported.version).toBe(14);
         expect(reexported.examAttemptPages[0].recognitionResult).toBe(expectedRecognitionResult);
         expect(restored.attempts[0].answers).toEqual([expect.objectContaining({
             examQuestionId: restored.questions[0].id, result: 'wrong', awardedScore: 0, reviewStatus: 'reviewed',
@@ -618,7 +619,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(question.paperId).toBe(attempt.paperId);
     });
 
-    it('v11 备份恢复 generated 试卷并按 v13 再导出', async () => {
+    it('v11 备份恢复 generated 试卷并按 v14 再导出', async () => {
         await database.examPaper.create({
             data: {
                 id: 'paper-v11', userId: 'user-1', title: '旧版试卷', status: 'ready', scope: 'all', difficulty: 'medium',
@@ -638,6 +639,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
             delete paper.examDate;
             delete paper.totalScore;
             delete paper.sourceFileName;
+            delete paper.printCode;
             for (const question of paper.questions) {
                 delete question.externalNumber;
                 delete question.pageNumber;
@@ -661,7 +663,7 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(await database.examAttemptAnswer.count()).toBe(0);
 
         const reexported = await exportBackup();
-        expect(reexported.version).toBe(13);
+        expect(reexported.version).toBe(14);
         expect(reexported.examPapers.find((paper: { title: string }) => paper.title === '旧版试卷'))
             .toMatchObject({
                 title: '旧版试卷',
@@ -672,6 +674,46 @@ describe('数据导出后再导入（真实 SQLite）', () => {
         expect(reexported.examAttempts).toEqual([]);
         expect(reexported.examAttemptPages).toEqual([]);
         expect(reexported.examAttemptAnswers).toEqual([]);
+    });
+
+    it('v14 保留合法打印短码，旧版缺码或目标库冲突时生成新码', async () => {
+        await database.examPaper.create({
+            data: {
+                id: 'paper-code', userId: 'user-1', title: '短码备份卷', status: 'ready', scope: 'all', difficulty: 'medium',
+                requestedCount: 1, subjectIds: '[]', printCode: 'Ab3xYz91', createdAt: new Date('2026-11-17T00:00:00Z'),
+                questions: { create: { id: 'question-code', order: 0, sourceShortId: 'CODE01', status: 'ready' } },
+            },
+        });
+        const backup = await exportBackup();
+        expect(backup.version).toBe(14);
+        expect(backup.examPapers[0].printCode).toBe('Ab3xYz91');
+
+        await clearUserData();
+        await importBackup(backup);
+        expect((await database.examPaper.findFirstOrThrow({ where: { title: '短码备份卷' } })).printCode)
+            .toBe('Ab3xYz91');
+
+        await clearUserData();
+        await database.examPaper.create({
+            data: {
+                id: 'paper-conflict', userId: 'user-1', title: '既有冲突卷', status: 'ready', scope: 'all', difficulty: 'medium',
+                requestedCount: 0, subjectIds: '[]', printCode: 'Ab3xYz91',
+            },
+        });
+        await importBackup(backup);
+        const conflicted = await database.examPaper.findFirstOrThrow({ where: { title: '短码备份卷' } });
+        expect(conflicted.printCode).toMatch(/^[1-9A-HJ-NP-Za-km-z]{8}$/);
+        expect(conflicted.printCode).not.toBe('Ab3xYz91');
+        expect((await database.examPaper.findUniqueOrThrow({ where: { id: 'paper-conflict' } })).printCode)
+            .toBe('Ab3xYz91');
+
+        const legacy = structuredClone(backup);
+        legacy.version = 13;
+        delete legacy.examPapers[0].printCode;
+        await clearUserData();
+        await importBackup(legacy);
+        expect((await database.examPaper.findFirstOrThrow({ where: { title: '短码备份卷' } })).printCode)
+            .toMatch(/^[1-9A-HJ-NP-Za-km-z]{8}$/);
     });
 
     it('遥测记录与协议、遥测设置属于实例数据，不进入备份', async () => {

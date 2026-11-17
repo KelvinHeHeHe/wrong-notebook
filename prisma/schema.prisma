@@ -258,6 +258,8 @@ model ExamPaper {
   examDate   DateTime?
   totalScore Float?
   sourceFileName String?
+  // 打印稿稳定短码；既有试卷惰性补齐，空值便于无损增量迁移。
+  printCode String? @unique
 
   questions  ExamQuestion[]
   pages      ExamPaperPage[]

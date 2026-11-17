@@ -12,6 +12,7 @@ import { resolveNotebookScope, SUBJECT_DISPLAY_NAMES } from "@/lib/notebook-scop
 import { QUESTION_TYPES } from "@/lib/question/question-type";
 import type { BackgroundTaskHandle } from "@/lib/background-tasks";
 import { createExamPracticeRecord } from "@/lib/exam/exam-results";
+import { generateUniqueExamPrintCode } from "@/lib/exam/exam-print-identity";
 
 const logger = createLogger('exam');
 
@@ -569,6 +570,7 @@ export async function createExamPaperFromSources(args: CreateExamPaperFromSource
             questionType: source.questionType,
         }));
     }
+    const printCode = await generateUniqueExamPrintCode(prisma);
     const paper = await prisma.examPaper.create({
         data: {
             userId,
@@ -580,6 +582,7 @@ export async function createExamPaperFromSources(args: CreateExamPaperFromSource
             requestedCount,
             subjectIds: subjectIdsJson,
             tagNames: tagNamesJson,
+            printCode,
             questions: { create: questionsCreate },
         },
         select: { id: true, title: true, requestedCount: true, _count: { select: { questions: true } } },

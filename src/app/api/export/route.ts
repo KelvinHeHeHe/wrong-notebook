@@ -176,6 +176,8 @@ export async function GET(req: Request) {
             practiceRecords,
             examPapers: examPapers.map((paper) => ({
                 ...paper,
+                // v14：显式保留纸面短码，避免未来精简 Prisma 查询时遗漏。
+                printCode: paper.printCode,
                 questions: paper.questions.map((question) => ({
                     ...question,
                     figureScale: normalizeFigureScale(question.figureScale),
