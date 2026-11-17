@@ -48,4 +48,10 @@ test('[E2E-EXAM-IMPORT] 两页照片部分失败后单页重试、校对发布�
     await expect(page).toHaveURL(`/exams/${paperId}/print`);
     await expect(page.getByText('E2E 外部整卷周测', { exact: true }).first()).toBeVisible();
     await expect(page.locator('.exam-sheet > .exam-question')).toHaveCount(6);
+
+    await page.goto(`/exams/${paperId}`);
+    await page.getByRole('link', { name: '回传纸质作答', exact: true }).click();
+    await expect(page).toHaveURL(`/exams/${paperId}/attempts/new`);
+    await expect(page.getByText('E2E 外部整卷周测', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('已作答试卷照片', { exact: true })).toBeVisible();
 });
