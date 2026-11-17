@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { FigureScaleEditor } from "@/components/error-detail/figure-scale-editor";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { AnswerSpaceControl } from "@/components/print-preview/answer-space-control";
@@ -16,6 +17,7 @@ import type { ExamPaperDetail, ExamQuestionDetail } from "@/types/api";
 
 interface ExamPrintSheetProps {
     paper: ExamPaperDetail;
+    scanUrl?: string;
     includeAnswers: boolean;
     answerSpace: AnswerSpaceMode;
     customSpaces: Record<string, number>;
@@ -112,6 +114,7 @@ function ExamPrintSectionHeader({ section }: { section: ExamSection<ExamQuestion
 /** 打印预览中的试卷正文：标题、满分行、各题（可按题型分大题）与可选答案页。 */
 export const ExamPrintSheet = forwardRef<HTMLDivElement, ExamPrintSheetProps>(function ExamPrintSheet({
     paper,
+    scanUrl,
     includeAnswers,
     answerSpace,
     customSpaces,
@@ -166,6 +169,22 @@ export const ExamPrintSheet = forwardRef<HTMLDivElement, ExamPrintSheetProps>(fu
     return (
         <div ref={ref} className="exam-sheet">
             <h1>{paper.title}</h1>
+            {scanUrl && (
+                <div className="exam-print-identity">
+                    <QRCodeSVG
+                        value={scanUrl}
+                        size={92}
+                        level="M"
+                        marginSize={1}
+                        title={t.exam.scanToUpload}
+                    />
+                    <div className="exam-print-identity-text">
+                        <strong>{t.exam.scanToUpload}</strong>
+                        <span>{t.exam.printCodeLabel}{t.common.colon}<b>{paper.printCode}</b></span>
+                        <span>{t.exam.printVersionLabel}{t.common.colon}<b>{paper.printVersion}</b></span>
+                    </div>
+                </div>
+            )}
             {fullScore !== null && (
                 <p className="exam-full-score">{t.exam.fullScore.replace("{total}", formatExamScore(fullScore))}</p>
             )}

@@ -5,6 +5,11 @@ export const KATEX_CSS_URL = "https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/kat
 export const EXAM_PRINT_CSS = `
 .exam-sheet { max-width: 210mm; margin: 0 auto; padding: 16px; color: #111; background: #fff; color-scheme: light; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.6; }
 .exam-sheet h1 { text-align: center; font-size: 22px; margin: 0 0 8px; }
+.exam-sheet .exam-print-identity { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 0 auto 10px; break-inside: avoid; page-break-inside: avoid; }
+.exam-sheet .exam-print-identity svg { width: 92px; height: 92px; flex: none; }
+.exam-sheet .exam-print-identity-text { display: flex; flex-direction: column; gap: 1px; font-size: 11px; line-height: 1.45; }
+.exam-sheet .exam-print-identity-text strong { font-size: 13px; }
+.exam-sheet .exam-print-identity-text b { font-family: ui-monospace, Menlo, monospace; letter-spacing: .04em; }
 .exam-sheet .exam-full-score { text-align: center; font-size: 14px; margin: 0 0 8px; }
 .exam-sheet .exam-meta { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 32px; font-size: 14px; margin-bottom: 20px; }
 .exam-sheet .exam-meta span { min-width: 120px; }

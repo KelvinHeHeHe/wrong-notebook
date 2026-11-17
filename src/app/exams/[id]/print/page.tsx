@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Download, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BackButton } from "@/components/ui/back-button";
 import { ExamFigureScaleBar } from "@/components/exam/exam-figure-scale-bar";
@@ -18,6 +19,12 @@ import {
     isAnswerSpaceMode,
 } from "@/lib/exam/exam-answer-space";
 import type { AnswerSpaceMode } from "@/lib/exam/exam-answer-space";
+import {
+    buildExamScanUrl,
+    isLoopbackPrintAccessUrl,
+    normalizePrintAccessBaseUrl,
+    PRINT_ACCESS_BASE_URL_STORAGE_KEY,
+} from "@/lib/exam/print-access-url";
 import { useSavedAnswerSpaces } from "@/lib/hooks/use-saved-answer-spaces";
 import type { AnswerSpaceChange } from "@/lib/hooks/use-saved-answer-spaces";
 import type { FigureAlign } from "@/lib/figure-scale";
@@ -34,6 +41,7 @@ export default function ExamPrintPage() {
     const [includeAnswers, setIncludeAnswers] = useState(true);
     const [answerSpace, setAnswerSpace] = useState<AnswerSpaceMode>(DEFAULT_ANSWER_SPACE_MODE);
     const [uniformPreview, setUniformPreview] = useState<{ scale: number | null; align: FigureAlign | null }>({ scale: null, align: null });
+    const [accessBaseUrl, setAccessBaseUrl] = useState("");
     const sheetRef = useRef<HTMLDivElement>(null);
 
     const paperId = paper?.id;
@@ -65,11 +73,34 @@ export default function ExamPrintPage() {
         if (isAnswerSpaceMode(saved)) setAnswerSpace(saved);
     }, []);
 
+    useEffect(() => {
+        let saved: string | null = null;
+        try {
+            saved = localStorage.getItem(PRINT_ACCESS_BASE_URL_STORAGE_KEY);
+        } catch {
+            // 无法读取本地存储时使用当前页面地址
+        }
+        const initial = normalizePrintAccessBaseUrl(saved ?? '') ?? window.location.origin;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- 浏览器 origin 与 localStorage 只能在挂载后读取
+        setAccessBaseUrl(initial);
+    }, []);
+
     const changeAnswerSpace = (value: string) => {
         if (!isAnswerSpaceMode(value)) return;
         setAnswerSpace(value);
         try {
             localStorage.setItem(ANSWER_SPACE_STORAGE_KEY, value);
+        } catch {
+            // 无痕模式等无法写入时只在本次生效
+        }
+    };
+
+    const changeAccessBaseUrl = (value: string) => {
+        setAccessBaseUrl(value);
+        const normalized = normalizePrintAccessBaseUrl(value);
+        try {
+            if (normalized) localStorage.setItem(PRINT_ACCESS_BASE_URL_STORAGE_KEY, normalized);
+            else localStorage.removeItem(PRINT_ACCESS_BASE_URL_STORAGE_KEY);
         } catch {
             // 无痕模式等无法写入时只在本次生效
         }
@@ -85,6 +116,13 @@ export default function ExamPrintPage() {
 
     const figureQuestions = paper.questions.filter((question) => question.status === "ready" && question.questionText && Boolean(question.figureSvg));
     const readyCount = paper.questions.filter((question) => question.status === "ready" && question.questionText).length;
+    const normalizedAccessBaseUrl = normalizePrintAccessBaseUrl(accessBaseUrl);
+    const scanUrl = normalizedAccessBaseUrl
+        ? buildExamScanUrl(normalizedAccessBaseUrl, paper.printCode, paper.printVersion)
+        : null;
+    const loopbackAccessUrl = normalizedAccessBaseUrl
+        ? isLoopbackPrintAccessUrl(normalizedAccessBaseUrl)
+        : false;
 
     const saveQuestionFigureScale = async (questionId: string, figureScale: number, figureAlign: FigureAlign) => {
         await apiClient.patch(`/api/exams/${paper.id}`, { questionId, figureScale, figureAlign });
@@ -156,6 +194,26 @@ export default function ExamPrintPage() {
                             {t.exam.printNow}
                         </Button>
                     </div>
+                    <div className="w-full grid gap-1 sm:grid-cols-[auto_minmax(16rem,1fr)] sm:items-center">
+                        <label htmlFor="exam-mobile-access-url" className="text-sm font-medium">
+                            {t.exam.mobileAccessUrl}
+                        </label>
+                        <Input
+                            id="exam-mobile-access-url"
+                            type="url"
+                            value={accessBaseUrl}
+                            onChange={(event) => changeAccessBaseUrl(event.target.value)}
+                            placeholder="http://192.168.1.8:3000"
+                            className="h-8"
+                        />
+                        <p className="text-xs text-muted-foreground sm:col-start-2">{t.exam.mobileAccessUrlHint}</p>
+                        {!normalizedAccessBaseUrl && accessBaseUrl && (
+                            <p className="text-xs text-destructive sm:col-start-2">{t.exam.mobileAccessUrlInvalid}</p>
+                        )}
+                        {loopbackAccessUrl && (
+                            <p className="text-xs text-amber-700 sm:col-start-2">{t.exam.mobileAccessUrlLoopback}</p>
+                        )}
+                    </div>
                     {answerSpace === "auto" && (
                         <p className="w-full text-xs text-muted-foreground">{t.exam.answerSpaceAutoHint}</p>
                     )}
@@ -179,6 +237,7 @@ export default function ExamPrintPage() {
             <ExamPrintSheet
                 ref={sheetRef}
                 paper={paper}
+                scanUrl={scanUrl ?? undefined}
                 includeAnswers={includeAnswers}
                 answerSpace={answerSpace}
                 customSpaces={customSpaces}

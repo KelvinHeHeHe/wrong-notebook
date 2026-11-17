@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { ExamPrintSheet } from '@/app/exams/[id]/print/exam-print-sheet';
 import { LanguageProvider } from '@/contexts/LanguageContext';
+import { buildExamHtmlDocument } from '@/lib/exam/exam-print';
 import type { ExamPaperDetail } from '@/types/api';
 
 const render = (element: React.ReactElement) => renderToStaticMarkup(<LanguageProvider>{element}</LanguageProvider>);
@@ -9,8 +10,8 @@ const render = (element: React.ReactElement) => renderToStaticMarkup(<LanguagePr
 function buildPaper(questions: Partial<ExamPaperDetail['questions'][number]>[]): ExamPaperDetail {
     return {
         id: 'p1',
-    printCode: 'Ab3xYz91',
-    printVersion: 'abcdef123456',
+        printCode: 'Ab3xYz91',
+        printVersion: 'abcdef123456',
         title: '周测',
         status: 'ready',
         scope: 'all',
@@ -47,6 +48,31 @@ function buildPaper(questions: Partial<ExamPaperDetail['questions'][number]>[]):
 const NOOP = async () => {};
 
 describe('ExamPrintSheet 分值打印', () => {
+    it('标题旁打印二维码、稳定短码和内容版次', () => {
+        const paper = buildPaper([{}]);
+        const html = render(
+            <ExamPrintSheet
+                paper={paper}
+                scanUrl="http://192.168.1.8:3000/exams/scan/Ab3xYz91?v=abcdef123456"
+                includeAnswers={false}
+                answerSpace="none"
+                customSpaces={{}}
+                uniformPreview={{ scale: null, align: null }}
+                onSaveFigureScale={NOOP}
+                onChangeCustomSpace={() => {}}
+            />
+        );
+
+        expect(html).toContain('exam-print-identity');
+        expect(html).toContain('<svg');
+        expect(html).toContain('扫码回传');
+        expect(html).toContain('Ab3xYz91');
+        expect(html).toContain('abcdef123456');
+        const standalone = buildExamHtmlDocument(paper.title, html);
+        expect(standalone).toContain('<svg');
+        expect(standalone).toContain('Ab3xYz91');
+    });
+
     it('已设分值的题号后显示（N 分），标题下显示满分', () => {
         const paper = buildPaper([{ score: 2 }, { score: 2.5 }]);
         const html = render(
