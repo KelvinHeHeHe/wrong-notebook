@@ -8,6 +8,23 @@
 
 图片、manifest、人工标注、凭据和报告放在仓库外的私有目录，**不得提交 Git、附件或公开日志**。儿童姓名、学校、学号等应先裁掉或遮挡；在获得必要授权后才交给所选 Provider。调用会把照片和候选题发送给该 Provider，需自行核对其数据政策。本工具不写业务数据库，不读取应用中的账号密钥，不自动创建样本目录；报告也不包含照片、答案全文、Key 或图片绝对路径，但题目和试卷标识仍应视为私有数据。
 
+先在仓库和所有 Git 工作树之外准备目录；工具不会自动复制或删除照片：
+
+```text
+/private/exam-evaluation/
+└── photos/
+    ├── page-001.jpg
+    └── page-002.webp
+```
+
+在源码目录启动仅监听 `127.0.0.1` 的标注器。必须保留 `--silent`，否则 npm 会把私有绝对路径回显到终端日志：
+
+```bash
+npm run --silent eval:label -- --dataset /private/exam-evaluation
+```
+
+用终端打印的一次性链接打开浏览器，逐页填写年级、学科、书写质量、拍摄质量、候选题和学生实际答案，再在原照片上为每个答案框选 1～4 个区域。草稿以 `0600` 权限自动保存在同一私有目录；两个标签页同时修改时，后保存者会进入只读冲突状态，避免静默覆盖。全部页面通过完成度检查后显式导出 `manifest.json`，既有清单会备份为 `manifest.previous.json`。标注器不读取 `.env`、不调用模型，也不写入 SQLite。
+
 ## Manifest
 
 UTF-8 JSON 顶层为 `samples`，每项代表一张本地 JPEG、PNG 或 WebP（1 字节～20 MiB）；相对图片路径按 manifest 所在目录解析。`paperId` 是人工标识，无需连接业务数据库；`questions` 是该试卷候选题（每页 1～100 题），`expected` 是这页实际可见题目的人工标准标注。每个期望答案必须附带独立人工标注的 `regions`，用来确认模型究竟识别了哪道题的书写；不能从模型声称的短码、题号或 ID 反推人工归属。期望题号必须存在于候选题中且不能重复；候选题 ID、短码、连续题号各自唯一。
@@ -20,14 +37,16 @@ UTF-8 JSON 顶层为 `samples`，每项代表一张本地 JPEG、PNG 或 WebP（
     {
       "image": "photos/synthetic-page-1.png",
       "paperId": "synthetic-math-paper",
+      "grade": 3,
       "subject": "数学",
       "handwriting": "清晰",
+      "photoQuality": "清晰",
       "language": "zh",
       "questions": [
         { "id": "synthetic-q1", "displayNumber": 1, "sourceShortId": "SYN001", "questionText": "合成题：计算 3 + 4。" }
       ],
       "expected": [
-        { "questionId": "synthetic-q1", "normalizedAnswer": "7", "regions": [{ "x": 0.1, "y": 0.2, "width": 0.3, "height": 0.1 }] }
+        { "questionId": "synthetic-q1", "normalizedAnswer": "7", "questionType": "calculation", "regions": [{ "x": 0.1, "y": 0.2, "width": 0.3, "height": 0.1 }] }
       ]
     }
   ]
@@ -36,7 +55,7 @@ UTF-8 JSON 顶层为 `samples`，每项代表一张本地 JPEG、PNG 或 WebP（
 
 `regions` 必填 1～4 个框：`x`、`y` 是左上角位置，`width`、`height` 必须为正，均为有限数且完整位于 0～1 内。人工应在与输入照片相同的方向和裁切范围内，框紧实际书写答案或明确空白的作答区域，不要框整道题或整页；多行/分散作答可标多个框。缺少区域的旧 manifest 必须补标后再评测，脚本不会退回依赖模型题号的旧算法。
 
-`language` 可选 `zh`（默认）或 `en`；`subject`、`handwriting` 可用于人工分层审阅。未作答的标准答案写空字符串。标准化只执行 Unicode NFC、首尾去空白、连续空白合并成一个空格；不忽略大小写、标点或数学符号，也不把语义等价答案当成完全一致。应标注学生**实际书写内容**，而非试题标准解答。
+正式清单要求 `grade` 为 1～6，`subject` 为数学/语文/英语，`handwriting` 为清晰/潦草/涂改/混合，`photoQuality` 为清晰/阴影/倾斜/模糊/混合；`questionType` 使用应用既有的 10 个标准题型 key。`language` 可选 `zh`（默认）或 `en`。未作答的标准答案写空字符串。标准化只执行 Unicode NFC、首尾去空白、连续空白合并成一个空格；不忽略大小写、标点或数学符号，也不把语义等价答案当成完全一致。应标注学生**实际书写内容**，而非试题标准解答。
 
 ## 配置与运行
 
@@ -73,7 +92,7 @@ node --conditions=react-server scripts/evaluate-exam-answer-extraction.mjs \
 
 例如两题的候选都提取到了，但短码和题号互换，即使答案文字都对，两个指标也都是 0%；4 题中 1 题完全正确、1 题匹配对但文字错、1 题匹配到别题、1 题漏提，指标为 50% 和 25%。框位置本身不足以区分的结果会保守记错，因此应同时审阅额外候选和人工框质量；这两项指标包含区域可定位性，不是独立的 OCR 字符准确率。
 
-报告 **version=2**，新增 `pairing.method=mutual-best-region-iou` 与 `pairing.minIoU=0.5`，保留逐题 `matched`/`exact` 布尔结论、计数、比例、模型标识和 `sufficientSampleSize`。不写入框坐标、照片或学生答案全文。旧 version=1 报告只按模型标识检查候选存在性，无法证明匹配正确率，不应与修正后的指标直接比较。
+报告 **version=3**，保留 `pairing.method=mutual-best-region-iou`、`pairing.minIoU=0.5`、逐题 `matched`/`exact` 布尔结论、计数、比例、模型标识和 `sufficientSampleSize`，并按年级、学科、题型、书写质量和拍摄质量输出固定分层汇总。旧 manifest 缺少分层字段时仍可评测并归入 `unlabeled`；新标注器导出时要求分层字段完整。不写入框坐标、照片或学生答案全文。version=1 只按模型标识检查候选存在性，version=2 没有完整分层，两者均不应与 v3 的分层结论直接混用。
 
 **95%** 指推荐 Provider/视觉模型在不少于 60 道代表性客观题上的“匹配且答案完全一致率”产品目标，**不是所有可配置 Provider 的 CI 硬门槛**。低于目标仍生成报告并退出 0，便于比较；不足 60 题时 `sufficientSampleSize=false`，只能作为工具冒烟，不能宣称达到正式验收。未匹配和低置信度答案必须在产品中进入人工复核。
 

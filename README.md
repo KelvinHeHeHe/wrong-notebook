@@ -583,8 +583,11 @@ npm run test:integration    # 集成测试
 npm test                    # 全部 Vitest 测试
 npm run test:coverage       # 测试覆盖率（低于最低要求时失败）
 npm run test:e2e            # 隔离应用、正式迁移测试库与本地模型服务，无需真实 API Key
+npm run --silent eval:label -- --dataset /仓库外/私有评测目录  # 本机可视化标注家庭样本
 bash scripts/ci.sh          # 完整 CI（Node.js 22+、Python 3，含生产构建）
 ```
+
+评测目录必须使用仓库和所有 Git 工作树之外的绝对路径，并包含 `photos/` 子目录。`--silent` 用于阻止 npm 把私有路径回显到日志；标注服务仅监听 `127.0.0.1`，不会写入业务数据库。完整流程见 [纸质作答答案提取人工评测](doc/EXAM_ANSWER_EVALUATION.md)。
 
 GitHub 的 `main` 与 PR CI 还会使用正式 Dockerfile，在原生 amd64、arm64 环境中验证镜像内的测试和生产构建，检查通过后不推送镜像。`.dockerignore` 保留单元测试复用的 `e2e/support` 模块；浏览器用例和测试产物仍排除在构建上下文外。
 

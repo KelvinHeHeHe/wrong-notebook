@@ -585,8 +585,11 @@ npm run test:integration    # Integration tests
 npm test                    # All Vitest tests
 npm run test:coverage       # Test coverage (fails below the minimum thresholds)
 npm run test:e2e            # Isolated app, migrated test database and local AI mock; no real API key
+npm run --silent eval:label -- --dataset /outside-the-repository/private-evaluation  # Label private family samples locally
 bash scripts/ci.sh          # Full CI (Node.js 22+, Python 3, includes production build)
 ```
+
+The evaluation directory must be an absolute path outside the repository and every Git worktree, with a `photos/` subdirectory. `--silent` prevents npm from echoing that private path into logs. The labeler listens only on `127.0.0.1` and never writes to the application database. See the [paper-answer extraction evaluation guide](doc/EXAM_ANSWER_EVALUATION.md) for the complete workflow.
 
 GitHub CI for `main` and pull requests also uses the production Dockerfile to run tests and production builds on native amd64 and arm64 runners, without publishing images. `.dockerignore` keeps the `e2e/support` modules reused by unit tests while excluding browser test cases and test output from the build context.
 
