@@ -94,10 +94,12 @@ describe('本地纸质作答提取评测 CLI', () => {
         const report = await evaluate('mixed', [expected(0, 1, '甲'), expected(1, 2, '乙'), expected(2, 3, '丙'), expected(3, 4, '丁')]);
         expect(report).toMatchObject({ expectedCount: 4, matchedCount: 2, exactAnswerCount: 1, matchingAccuracy: 0.5, matchedExactAnswerAccuracy: 0.25 });
     });
-    it('配对只依赖区域，支持多个框和候选乱序；重叠同分的歧义不猜测', async () => {
+    it('配对只依赖区域，支持多个框和候选乱序', async () => {
         candidates = [candidate(1, 2, '乙'), candidate(0, 1, '甲')];
         const truth = [expected(0, 1, '甲'), { ...expected(1, 2, '乙'), regions: [region(1), region(2)] }];
         expect(await evaluate('reordered', truth)).toMatchObject({ matchedCount: 2, exactAnswerCount: 2 });
+    });
+    it('重叠同分的歧义不猜测', async () => {
         candidates = [candidate(0, 1, '甲'), candidate(0, 2, '乙')];
         expect(await evaluate('ambiguous', [expected(0, 1, '甲'), expected(1, 2, '乙')])).toMatchObject({ matchedCount: 0, exactAnswerCount: 0 });
     });
