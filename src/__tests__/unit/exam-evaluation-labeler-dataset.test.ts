@@ -56,6 +56,13 @@ afterEach(async () => {
 });
 
 describe('家庭样本评测私有数据集', () => {
+    it('源码快照没有 Git 元数据时仍保护源码根目录', async () => {
+        const snapshotRoot = join(temporaryRoot, 'source-snapshot');
+        await mkdir(snapshotRoot);
+
+        await expect(resolveRepositoryBoundaries(snapshotRoot)).resolves.toEqual([await realpath(snapshotRoot)]);
+    });
+
     it('拒绝源码、Git common dir、已注册工作树及其符号链接作为数据集', async () => {
         const boundaries = await resolveRepositoryBoundaries(repositoryRoot);
         expect(boundaries).toContain(await realpath(repositoryRoot));

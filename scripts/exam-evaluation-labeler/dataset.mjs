@@ -51,6 +51,11 @@ async function atomicWrite(path, content) {
 
 export async function resolveRepositoryBoundaries(repositoryRoot) {
     const root = await realpath(repositoryRoot);
+    try { await lstat(join(root, '.git')); }
+    catch (error) {
+        if (error?.code === 'ENOENT') return [root];
+        throw error;
+    }
     const [{ stdout: commonOutput }, { stdout: worktreeOutput }] = await Promise.all([
         execute('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir']),
         execute('git', ['-C', root, 'worktree', 'list', '--porcelain']),
