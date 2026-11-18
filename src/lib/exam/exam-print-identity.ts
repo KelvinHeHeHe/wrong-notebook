@@ -7,6 +7,7 @@ import {
     EXAM_PRINT_CODE_LENGTH,
     isExamPrintCode,
 } from "@/lib/exam/exam-print-code";
+import { normalizeQuestionType } from "@/lib/question/question-type";
 
 export { isExamPrintCode } from "@/lib/exam/exam-print-code";
 
@@ -25,6 +26,8 @@ export interface PrintableExamQuestion {
     answerSpacePx: number | null;
     score: number | null;
     questionType: string | null;
+    errorItemQuestionType?: string | null;
+    errorItem?: { questionType: string | null } | null;
     externalNumber: string | null;
 }
 
@@ -75,6 +78,35 @@ export async function generateUniqueExamPrintCode(client: ExamPrintCodeLookup): 
     throw new Error("无法生成唯一的试卷打印短码");
 }
 
+function isPrintCodeUniqueConflict(error: unknown): boolean {
+    if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "P2002") return false;
+    const meta = "meta" in error && typeof error.meta === "object" && error.meta !== null ? error.meta : null;
+    const target = meta && "target" in meta ? meta.target : null;
+    if (Array.isArray(target)) return target.some((value) => value === "printCode");
+    return typeof target === "string" && target.toLowerCase().includes("printcode");
+}
+
+/** 创建试卷时把实际写入包含在唯一冲突重试边界内。 */
+export async function createExamPaperWithPrintCode<T>(
+    client: ExamPrintCodeLookup,
+    create: (printCode: string) => Promise<T>,
+    preferredPrintCode?: string | null,
+): Promise<T> {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+        const printCode = attempt === 0 && isExamPrintCode(preferredPrintCode)
+            ? preferredPrintCode
+            : generateExamPrintCode();
+        const existing = await client.examPaper.findUnique({ where: { printCode }, select: { id: true } });
+        if (existing) continue;
+        try {
+            return await create(printCode);
+        } catch (error) {
+            if (!isPrintCodeUniqueConflict(error)) throw error;
+        }
+    }
+    throw new Error("无法生成唯一的试卷打印短码");
+}
+
 /** 为既有试卷惰性补码；并发请求只接受数据库中最终胜出的短码。 */
 export async function ensureExamPrintCode(client: ExamPrintCodeManager, paperId: string): Promise<string> {
     const paper = await client.examPaper.findUnique({
@@ -84,18 +116,25 @@ export async function ensureExamPrintCode(client: ExamPrintCodeManager, paperId:
     if (!paper) throw new Error("试卷不存在");
     if (isExamPrintCode(paper.printCode)) return paper.printCode;
 
-    const printCode = await generateUniqueExamPrintCode(client);
-    const updated = await client.examPaper.updateMany({
-        where: { id: paperId, printCode: null },
-        data: { printCode },
-    });
-    if (updated.count === 1) return printCode;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+        const printCode = await generateUniqueExamPrintCode(client);
+        try {
+            const updated = await client.examPaper.updateMany({
+                where: { id: paperId, printCode: null },
+                data: { printCode },
+            });
+            if (updated.count === 1) return printCode;
+        } catch (error) {
+            if (!isPrintCodeUniqueConflict(error)) throw error;
+            continue;
+        }
 
-    const current = await client.examPaper.findUnique({
-        where: { id: paperId },
-        select: { id: true, printCode: true },
-    });
-    if (isExamPrintCode(current?.printCode)) return current.printCode;
+        const current = await client.examPaper.findUnique({
+            where: { id: paperId },
+            select: { id: true, printCode: true },
+        });
+        if (isExamPrintCode(current?.printCode)) return current.printCode;
+    }
     throw new Error("无法写入试卷打印短码");
 }
 
@@ -116,7 +155,8 @@ export function createExamPrintVersion(paper: PrintableExamPaper): string {
             figureAlign: question.figureAlign,
             answerSpacePx: question.answerSpacePx,
             score: question.score,
-            questionType: question.questionType,
+            questionType: normalizeQuestionType(question.questionType)
+                ?? normalizeQuestionType(question.errorItemQuestionType ?? question.errorItem?.questionType),
             externalNumber: question.externalNumber,
         })),
     };

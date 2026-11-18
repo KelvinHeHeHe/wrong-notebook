@@ -37,6 +37,7 @@ export const GET = withUser(async (
                     answerSpacePx: true,
                     score: true,
                     questionType: true,
+                    errorItem: { select: { questionType: true } },
                     externalNumber: true,
                 },
             },

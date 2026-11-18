@@ -4,7 +4,7 @@ import { conflict, internalError, validationError } from '@/lib/api-errors';
 import { withUser } from '@/lib/api-handler';
 import type { AuthenticatedContext } from '@/lib/api-handler';
 import { ExamPageImageError, validateExamPageImages } from '@/lib/exam/exam-page-image';
-import { generateUniqueExamPrintCode } from '@/lib/exam/exam-print-identity';
+import { createExamPaperWithPrintCode } from '@/lib/exam/exam-print-identity';
 import { createLogger } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import { createImportedExamSchema } from '@/lib/schemas/exam';
@@ -35,8 +35,7 @@ export const POST = withUser(async (req: Request, { user }: AuthenticatedContext
             return conflict('EXAM_PAGE_DUPLICATE');
         }
 
-        const printCode = await generateUniqueExamPrintCode(prisma);
-        const paper = await prisma.$transaction((tx) => tx.examPaper.create({
+        const paper = await createExamPaperWithPrintCode(prisma, (printCode) => prisma.$transaction((tx) => tx.examPaper.create({
             data: {
                 userId: user.id,
                 title: input.title,
@@ -65,7 +64,7 @@ export const POST = withUser(async (req: Request, { user }: AuthenticatedContext
                 status: true,
                 pages: { orderBy: { order: 'asc' }, select: { id: true, order: true, role: true } },
             },
-        }));
+        })));
 
         return NextResponse.json({ paperId: paper.id, status: paper.status, pages: paper.pages }, { status: 201 });
     } catch (error) {

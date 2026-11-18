@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+    createExamPaperWithPrintCode,
     createExamPrintVersion,
     ensureExamPrintCode,
     generateExamPrintCode,
@@ -90,6 +91,42 @@ describe('试卷打印身份', () => {
         }));
     });
 
+    it('惰性补码写入遇到 printCode 唯一冲突时换码重试', async () => {
+        const findUnique = vi.fn()
+            .mockResolvedValueOnce({ id: 'paper-1', printCode: null })
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null);
+        const updateMany = vi.fn()
+            .mockRejectedValueOnce({ code: 'P2002', meta: { target: ['printCode'] } })
+            .mockResolvedValueOnce({ count: 1 });
+
+        await expect(ensureExamPrintCode({ examPaper: { findUnique, updateMany } }, 'paper-1'))
+            .resolves.toMatch(/^[1-9A-HJ-NP-Za-km-z]{8}$/);
+        expect(updateMany).toHaveBeenCalledTimes(2);
+    });
+
+    it('创建试卷写入遇到 printCode 唯一冲突时换码重试', async () => {
+        const findUnique = vi.fn().mockResolvedValue(null);
+        const create = vi.fn()
+            .mockRejectedValueOnce({ code: 'P2002', meta: { target: ['printCode'] } })
+            .mockResolvedValueOnce({ id: 'paper-1' });
+
+        await expect(createExamPaperWithPrintCode({ examPaper: { findUnique } }, create))
+            .resolves.toEqual({ id: 'paper-1' });
+        expect(create).toHaveBeenCalledTimes(2);
+        expect(create.mock.calls[0][0]).not.toBe(create.mock.calls[1][0]);
+    });
+
+    it('创建试卷遇到其他唯一约束冲突时不重试', async () => {
+        const findUnique = vi.fn().mockResolvedValue(null);
+        const error = { code: 'P2002', meta: { target: ['otherField'] } };
+        const create = vi.fn().mockRejectedValue(error);
+
+        await expect(createExamPaperWithPrintCode({ examPaper: { findUnique } }, create))
+            .rejects.toBe(error);
+        expect(create).toHaveBeenCalledTimes(1);
+    });
+
     it('相同可打印内容产生稳定的 12 位版次', () => {
         const first = createExamPrintVersion(printablePaper);
         const second = createExamPrintVersion({
@@ -115,6 +152,26 @@ describe('试卷打印身份', () => {
         expect(createExamPrintVersion({
             ...printablePaper,
             questions: [{ ...printablePaper.questions[0], order: 1 }],
+        })).not.toBe(original);
+    });
+
+    it('旧卷使用关联错题的回退题型时，题型变化会改变版次', () => {
+        const original = createExamPrintVersion({
+            ...printablePaper,
+            questions: [{
+                ...printablePaper.questions[0],
+                questionType: null,
+                errorItemQuestionType: 'single_choice',
+            }],
+        });
+
+        expect(createExamPrintVersion({
+            ...printablePaper,
+            questions: [{
+                ...printablePaper.questions[0],
+                questionType: null,
+                errorItemQuestionType: 'fill_blank',
+            }],
         })).not.toBe(original);
     });
 

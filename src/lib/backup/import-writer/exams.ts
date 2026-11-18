@@ -6,7 +6,7 @@ import { sanitizeFigureSvg } from "@/lib/figure-svg";
 import { normalizeFigureAlign, normalizeFigureScale } from "@/lib/figure-scale";
 import { normalizeCustomAnswerSpacePx } from "@/lib/exam/exam-answer-space";
 import { normalizeExamScore } from "@/lib/exam/exam-score";
-import { generateUniqueExamPrintCode } from "@/lib/exam/exam-print-identity";
+import { createExamPaperWithPrintCode } from "@/lib/exam/exam-print-identity";
 import { normalizeQuestionType } from "@/lib/question/question-type";
 import { mapSubjectIds } from "@/lib/backup/import-parser";
 import type { ImportContext } from "./types";
@@ -68,14 +68,7 @@ export async function importExamPapers(ctx: ImportContext): Promise<void> {
             continue;
         }
 
-        let printCode = paper.printCode;
-        if (printCode) {
-            const occupied = await tx.examPaper.findUnique({ where: { printCode }, select: { id: true } });
-            if (occupied) printCode = null;
-        }
-        printCode ??= await generateUniqueExamPrintCode(tx);
-
-        const created = await tx.examPaper.create({
+        const created = await createExamPaperWithPrintCode(tx, (printCode) => tx.examPaper.create({
             data: {
                 userId: targetUserId,
                 title: String(raw.title || ''),
@@ -99,7 +92,7 @@ export async function importExamPapers(ctx: ImportContext): Promise<void> {
                 createdAt: paper.createdAt,
                 updatedAt: paper.updatedAt,
             },
-        });
+        }), paper.printCode);
         for (const [index, question] of questions.entries()) {
             const errorItemId = question.errorItemId && errorItemOwnerMap.get(question.errorItemId) === targetUserId
                 ? errorItemIdMap.get(question.errorItemId) : undefined;

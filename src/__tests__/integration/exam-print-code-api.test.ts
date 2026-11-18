@@ -127,6 +127,40 @@ describe('试卷打印短码 API', () => {
         expect(await matching.json()).toMatchObject({ versionMatches: true });
     });
 
+    it('旧卷关联错题的回退题型变化时返回新版次', async () => {
+        mocks.examPaper.findFirst
+            .mockResolvedValueOnce({
+                ...paper,
+                groupByType: true,
+                questions: [{ ...question, questionType: null, errorItem: { questionType: 'single_choice' } }],
+            })
+            .mockResolvedValueOnce({
+                ...paper,
+                groupByType: true,
+                questions: [{ ...question, questionType: null, errorItem: { questionType: 'fill_blank' } }],
+            });
+
+        const first = await RESOLVE_PRINT_CODE(
+            new Request('http://localhost/api/exams/print-code/Ab3xYz91'),
+            routeParams({ printCode: 'Ab3xYz91' }),
+        );
+        const second = await RESOLVE_PRINT_CODE(
+            new Request('http://localhost/api/exams/print-code/Ab3xYz91'),
+            routeParams({ printCode: 'Ab3xYz91' }),
+        );
+
+        expect((await second.json()).currentPrintVersion).not.toBe((await first.json()).currentPrintVersion);
+        expect(mocks.examPaper.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+            select: expect.objectContaining({
+                questions: expect.objectContaining({
+                    select: expect.objectContaining({
+                        errorItem: { select: { questionType: true } },
+                    }),
+                }),
+            }),
+        }));
+    });
+
     it('详情接口为既有无短码试卷惰性补码并返回内容版次', async () => {
         mocks.examPaper.findUnique.mockImplementation(async (args: Record<string, unknown>) => {
             const where = args.where as Record<string, unknown>;
