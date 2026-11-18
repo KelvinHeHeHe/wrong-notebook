@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { expect, test } from './support/fixtures';
 
 test('[E2E-PAPER-QR] 扫码登录、版次警告、所有权隔离与手机回传入口', async ({ page, scenario }) => {
@@ -40,8 +42,21 @@ test('[E2E-PAPER-QR] 扫码登录、版次警告、所有权隔离与手机回�
     await scenario.login(page);
     const detail = await (await page.request.get(`/api/exams/${paper.id}`)).json() as { printVersion: string };
 
+    await page.goto(`/exams/${paper.id}/print`);
+    await expect(page.locator('.exam-print-identity')).toContainText(detail.printVersion);
+    await page.getByRole('button', { name: '增大本题留白', exact: true }).click();
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: '下载 HTML', exact: true }).click();
+    const download = await downloadPromise;
+    const updatedDetail = await (await page.request.get(`/api/exams/${paper.id}`)).json() as { printVersion: string };
+    expect(updatedDetail.printVersion).not.toBe(detail.printVersion);
+    await expect(page.locator('.exam-print-identity')).toContainText(updatedDetail.printVersion);
+    const downloadPath = await download.path();
+    expect(downloadPath).toBeTruthy();
+    expect(readFileSync(downloadPath!, 'utf8')).toContain(updatedDetail.printVersion);
+
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(`/exams/scan/Ab3xYz91?v=${detail.printVersion}`);
+    await page.goto(`/exams/scan/Ab3xYz91?v=${updatedDetail.printVersion}`);
     await page.waitForURL(`/exams/${paper.id}/attempts/new`);
     await expect(page.getByRole('heading', { name: '回传纸质作答', exact: true })).toBeVisible();
     await expect(page.getByLabel('已作答试卷照片', { exact: true })).toBeAttached();
@@ -58,7 +73,7 @@ test('[E2E-PAPER-QR] 扫码登录、版次警告、所有权隔离与手机回�
     await expect(page.getByText('其他账号秘密试卷', { exact: true })).toHaveCount(0);
 
     await page.context().clearCookies();
-    await page.goto(`/exams/scan/Ab3xYz91?v=${detail.printVersion}`);
+    await page.goto(`/exams/scan/Ab3xYz91?v=${updatedDetail.printVersion}`);
     await expect(page).toHaveURL(/\/login\?callbackUrl=/);
     await page.locator('input[name="email"]').fill(scenario.user.email);
     await page.locator('input[name="password"]').fill('e2e-student-pass');

@@ -45,24 +45,27 @@ export function useSavedAnswerSpaces(
         return result;
     }, [items, overrides]);
 
-    const flush = useCallback(() => {
+    const flush = useCallback(async (): Promise<boolean> => {
         if (timerRef.current) {
             clearTimeout(timerRef.current);
             timerRef.current = null;
         }
-        if (pendingRef.current.size === 0) return;
+        if (pendingRef.current.size === 0) return true;
         const changes = Array.from(pendingRef.current, ([id, answerSpacePx]) => ({ id, answerSpacePx }));
         pendingRef.current.clear();
-        saveRef.current(changes)
-            .then(() => setSaveFailed(false))
-            .catch((error: unknown) => {
-                setSaveFailed(true);
-                frontendLogger.error("[AnswerSpace]", "Failed to save answer space", { error });
-            });
+        try {
+            await saveRef.current(changes);
+            setSaveFailed(false);
+            return true;
+        } catch (error: unknown) {
+            setSaveFailed(true);
+            frontendLogger.error("[AnswerSpace]", "Failed to save answer space", { error });
+            return false;
+        }
     }, []);
 
     // 离开页面前把尚未保存的改动发出去
-    useEffect(() => flush, [flush]);
+    useEffect(() => () => { void flush(); }, [flush]);
 
     const queue = useCallback((changes: AnswerSpaceChange[], immediate: boolean) => {
         if (changes.length === 0) return;
@@ -73,11 +76,11 @@ export function useSavedAnswerSpaces(
         });
         for (const { id, answerSpacePx } of changes) pendingRef.current.set(id, answerSpacePx);
         if (immediate) {
-            flush();
+            void flush();
             return;
         }
         if (timerRef.current) clearTimeout(timerRef.current);
-        timerRef.current = setTimeout(flush, SAVE_DELAY_MS);
+        timerRef.current = setTimeout(() => { void flush(); }, SAVE_DELAY_MS);
     }, [flush]);
 
     /** 调整或恢复单题留白（null 为恢复默认） */
@@ -90,5 +93,5 @@ export function useSavedAnswerSpaces(
         queue(Object.keys(customSpaces).map((id) => ({ id, answerSpacePx: null })), true);
     }, [customSpaces, queue]);
 
-    return { customSpaces, setSpace, resetAll, saveFailed };
+    return { customSpaces, setSpace, resetAll, saveFailed, flushPending: flush };
 }

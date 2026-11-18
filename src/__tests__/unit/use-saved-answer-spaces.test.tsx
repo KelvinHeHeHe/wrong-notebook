@@ -61,6 +61,15 @@ describe('useSavedAnswerSpaces', () => {
         expect(save).toHaveBeenCalledWith([{ id: 'b', answerSpacePx: 120 }, { id: 'a', answerSpacePx: 260 }]);
     });
 
+    it('打印前可主动刷新尚未到期的延迟保存', async () => {
+        await act(async () => { spaces.setSpace('b', 180); });
+        expect(save).not.toHaveBeenCalled();
+
+        await act(async () => { await spaces.flushPending(); });
+
+        expect(save).toHaveBeenCalledWith([{ id: 'b', answerSpacePx: 180 }]);
+    });
+
     it('恢复默认与全部重置立即保存', async () => {
         await act(async () => { spaces.setSpace('a', null); });
         expect(spaces.customSpaces).toEqual({});

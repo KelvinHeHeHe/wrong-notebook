@@ -25,6 +25,8 @@ import {
     normalizePrintAccessBaseUrl,
     PRINT_ACCESS_BASE_URL_STORAGE_KEY,
 } from "@/lib/exam/print-access-url";
+import { patchExamAndRefresh } from "@/lib/exam/exam-print-updates";
+import type { ExamPrintUpdate } from "@/lib/exam/exam-print-updates";
 import { useSavedAnswerSpaces } from "@/lib/hooks/use-saved-answer-spaces";
 import type { AnswerSpaceChange } from "@/lib/hooks/use-saved-answer-spaces";
 import type { FigureAlign } from "@/lib/figure-scale";
@@ -43,23 +45,33 @@ export default function ExamPrintPage() {
     const [uniformPreview, setUniformPreview] = useState<{ scale: number | null; align: FigureAlign | null }>({ scale: null, align: null });
     const [accessBaseUrl, setAccessBaseUrl] = useState("");
     const sheetRef = useRef<HTMLDivElement>(null);
+    const pendingPaperUpdateRef = useRef<Promise<void>>(Promise.resolve());
 
     const paperId = paper?.id;
+    const applyPaperUpdates = useCallback((updates: readonly ExamPrintUpdate[]) => {
+        if (!paperId) return Promise.resolve();
+        const operation = pendingPaperUpdateRef.current
+            .catch(() => undefined)
+            .then(() => patchExamAndRefresh(paperId, updates))
+            .then((refreshed) => { setPaper(refreshed); });
+        pendingPaperUpdateRef.current = operation;
+        return operation;
+    }, [paperId]);
     const saveAnswerSpaces = useCallback(async (changes: AnswerSpaceChange[]) => {
         if (!paperId) return;
         // 全部恢复默认时一次清除整卷，否则逐题保存
         if (changes.length > 1 && changes.every((change) => change.answerSpacePx === null)) {
-            await apiClient.patch(`/api/exams/${paperId}`, { answerSpacePx: null });
+            await applyPaperUpdates([{ answerSpacePx: null }]);
             return;
         }
-        await Promise.all(changes.map(({ id, answerSpacePx }) =>
-            apiClient.patch(`/api/exams/${paperId}`, { questionId: id, answerSpacePx })));
-    }, [paperId]);
+        await applyPaperUpdates(changes.map(({ id, answerSpacePx }) => ({ questionId: id, answerSpacePx })));
+    }, [applyPaperUpdates, paperId]);
     const {
         customSpaces,
         setSpace: setQuestionCustomSpace,
         resetAll: resetAllCustomSpaces,
         saveFailed: answerSpaceSaveFailed,
+        flushPending: flushAnswerSpaces,
     } = useSavedAnswerSpaces(paper?.questions ?? EMPTY_QUESTIONS, saveAnswerSpaces);
 
     useEffect(() => {
@@ -125,22 +137,26 @@ export default function ExamPrintPage() {
         : false;
 
     const saveQuestionFigureScale = async (questionId: string, figureScale: number, figureAlign: FigureAlign) => {
-        await apiClient.patch(`/api/exams/${paper.id}`, { questionId, figureScale, figureAlign });
-        setPaper((prev) => (prev ? {
-            ...prev,
-            questions: prev.questions.map((question) => (question.id === questionId ? { ...question, figureScale, figureAlign } : question)),
-        } : prev));
+        await applyPaperUpdates([{ questionId, figureScale, figureAlign }]);
     };
 
     const saveUniformFigureScale = async (patch: { figureScale?: number; figureAlign?: FigureAlign }) => {
-        await apiClient.patch(`/api/exams/${paper.id}`, patch);
-        setPaper((prev) => (prev ? {
-            ...prev,
-            questions: prev.questions.map((question) => ({ ...question, ...patch })),
-        } : prev));
+        await applyPaperUpdates([patch]);
     };
 
-    const downloadHtml = () => {
+    const preparePaperOutput = async () => {
+        if (!await flushAnswerSpaces()) return false;
+        try {
+            await pendingPaperUpdateRef.current;
+        } catch {
+            return false;
+        }
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        return true;
+    };
+
+    const downloadHtml = async () => {
+        if (!await preparePaperOutput()) return;
         if (!sheetRef.current) return;
         const clone = sheetRef.current.cloneNode(true) as HTMLElement;
         clone.querySelectorAll(".figure-scale-editor-controls, .answer-space-controls, .print\\:hidden").forEach((element) => element.remove());
@@ -151,6 +167,11 @@ export default function ExamPrintPage() {
         link.download = examFileName(paper.title);
         link.click();
         URL.revokeObjectURL(url);
+    };
+
+    const printNow = async () => {
+        if (!await preparePaperOutput()) return;
+        window.print();
     };
 
     return (
@@ -189,7 +210,7 @@ export default function ExamPrintPage() {
                             <Download className="mr-2 h-4 w-4" />
                             {t.exam.downloadHtml}
                         </Button>
-                        <Button size="sm" onClick={() => window.print()}>
+                        <Button size="sm" onClick={printNow}>
                             <Printer className="mr-2 h-4 w-4" />
                             {t.exam.printNow}
                         </Button>
