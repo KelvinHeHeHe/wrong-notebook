@@ -167,6 +167,9 @@ export function createLabelerServer({ context, token }) {
     });
 }
 
+/**
+ * @param {{ datasetPath: string, repositoryRoot: string, port?: number, token?: string, output?: { write: (value: string) => unknown } }} options
+ */
 export async function startLabeler({ datasetPath, repositoryRoot, port = 0, token = randomBytes(32).toString('base64url'), output = process.stdout }) {
     const context = await openDataset({ datasetPath, repositoryRoot });
     const server = createLabelerServer({ context, token });

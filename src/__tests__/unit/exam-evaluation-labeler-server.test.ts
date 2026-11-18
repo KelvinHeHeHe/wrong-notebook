@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -43,7 +44,7 @@ beforeEach(async () => {
     await mkdir(join(datasetPath, 'photos'), { recursive: true });
     await writeFile(join(datasetPath, 'photos', 'private-page.jpg'), Buffer.alloc(32, 1));
     output = '';
-    running = await startLabeler({ datasetPath, repositoryRoot, token, output: { write: (value: string) => { output += value; } } });
+    running = await startLabeler({ datasetPath, repositoryRoot, token, output: { write: (value: string) => { output += value; return true; } } });
 });
 
 afterEach(async () => {
@@ -60,6 +61,67 @@ describe('家庭样本评测标注服务', () => {
             expect(() => parseLabelerArgs(args)).toThrow(expect.objectContaining({ code: 'ARGUMENTS' }));
         }
     });
+
+    it('通过 npm 正式入口完成草稿导出并在 SIGTERM 后正常退出', async () => {
+        const child = spawn('npm', ['run', '--silent', 'eval:label', '--', '--dataset', datasetPath], {
+            cwd: repositoryRoot,
+            env: { ...process.env, NO_COLOR: '1' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.setEncoding('utf8');
+        child.stderr.setEncoding('utf8');
+        child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+        child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+        const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve_) => {
+            child.once('exit', (code, signal) => resolve_({ code, signal }));
+        });
+        const url = await new Promise<URL>((resolve_, reject) => {
+            const timeout = setTimeout(() => reject(new Error(`标注器未输出启动地址：${stderr}`)), 10_000);
+            const inspect = () => {
+                const match = stdout.match(/http:\/\/127\.0\.0\.1:\d+\/#token=[A-Za-z0-9_-]+/u);
+                if (!match) return;
+                clearTimeout(timeout);
+                resolve_(new URL(match[0]));
+            };
+            child.stdout.on('data', inspect);
+            child.once('exit', (code) => {
+                clearTimeout(timeout);
+                reject(new Error(`标注器提前退出（${code}）：${stderr}`));
+            });
+        });
+        try {
+            const token = new URLSearchParams(url.hash.slice(1)).get('token');
+            const headers = { 'X-Evaluation-Token': token ?? '' };
+            const stateResponse = await fetch(new URL('/api/state', url), { headers });
+            expect(stateResponse.status).toBe(200);
+            const state = await stateResponse.json() as { draft: { revision: number; samples: Array<Record<string, unknown>> } };
+            Object.assign(state.draft.samples[0], {
+                paperId: 'paper-cli-1', grade: 3, subject: '数学', handwriting: '清晰', photoQuality: '清晰', language: 'zh',
+                questions: [{ id: 'q1', displayNumber: 1, sourceShortId: 'CLI001', questionText: '脱敏题目' }],
+                expected: [{ questionId: 'q1', normalizedAnswer: 'private-cli-answer', questionType: 'calculation', regions: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.1 }] }],
+            });
+            const writeHeaders = { ...headers, Origin: url.origin, 'Content-Type': 'application/json' };
+            const draftResponse = await fetch(new URL('/api/draft', url), {
+                method: 'PUT', headers: writeHeaders, body: JSON.stringify({ revision: state.draft.revision, draft: state.draft }),
+            });
+            expect(draftResponse.status).toBe(200);
+            const saved = await draftResponse.json() as { revision: number };
+            const exportResponse = await fetch(new URL('/api/export', url), {
+                method: 'POST', headers: writeHeaders, body: JSON.stringify({ revision: saved.revision }),
+            });
+            expect(exportResponse.status).toBe(200);
+            expect((await stat(join(datasetPath, 'manifest.json'))).mode & 0o777).toBe(0o600);
+            expect(JSON.parse(await readFile(join(datasetPath, 'manifest.json'), 'utf8'))).toMatchObject({ samples: [{ paperId: 'paper-cli-1' }] });
+        } finally {
+            child.kill('SIGTERM');
+        }
+        await expect(exit).resolves.toEqual({ code: 0, signal: null });
+        expect(`${stdout}\n${stderr}`).not.toContain(datasetPath);
+        expect(`${stdout}\n${stderr}`).not.toContain('private-page.jpg');
+        expect(`${stdout}\n${stderr}`).not.toContain('private-cli-answer');
+    }, 20_000);
 
     it('固定监听 127.0.0.1，用 fragment 输出令牌且不打印私有目录', () => {
         const address = running!.server.address() as AddressInfo;
