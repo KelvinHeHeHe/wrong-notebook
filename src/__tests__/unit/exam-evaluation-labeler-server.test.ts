@@ -71,6 +71,23 @@ describe('家庭样本评测标注服务', () => {
         expect(output).not.toContain('private-page.jpg');
     });
 
+    it('只提供固定标注界面资源并为 HTML、CSS 和模块设置安全 MIME', async () => {
+        const resources = [
+            ['/', 'text/html; charset=utf-8'],
+            ['/ui/styles.css', 'text/css; charset=utf-8'],
+            ['/ui/app.mjs', 'text/javascript; charset=utf-8'],
+            ['/ui/model.mjs', 'text/javascript; charset=utf-8'],
+            ['/exam-evaluation/strata.mjs', 'text/javascript; charset=utf-8'],
+        ] as const;
+        for (const [path, contentType] of resources) {
+            const response = await rawRequest(path, { headers: { Host: new URL(running!.origin).host } });
+            expect(response.status).toBe(200);
+            expect(response.headers['content-type']).toBe(contentType);
+            expect(response.headers['content-security-policy']).toContain("script-src 'self'");
+        }
+        expect((await rawRequest('/ui/../dataset.mjs', { headers: { Host: new URL(running!.origin).host } })).status).toBe(404);
+    });
+
     it('所有 API 都要求正确令牌，并严格拒绝错误 Host', async () => {
         expect((await rawRequest('/api/state', { headers: { Host: new URL(running!.origin).host } })).status).toBe(401);
         expect((await rawRequest('/api/state', { headers: { Host: new URL(running!.origin).host, 'X-Evaluation-Token': 'wrong' } })).status).toBe(401);

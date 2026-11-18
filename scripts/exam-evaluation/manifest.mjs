@@ -1,13 +1,9 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 
-export const QUESTION_TYPE_KEYS = [
-    'single_choice', 'multiple_choice', 'true_false', 'fill_blank', 'calculation',
-    'solution', 'reading', 'cloze', 'writing', 'other',
-];
-export const SUBJECTS = ['数学', '语文', '英语'];
-export const HANDWRITING_QUALITIES = ['清晰', '潦草', '涂改', '混合'];
-export const PHOTO_QUALITIES = ['清晰', '阴影', '倾斜', '模糊', '混合'];
+import { HANDWRITING_QUALITIES, PHOTO_QUALITIES, QUESTION_TYPE_KEYS, SUBJECTS } from './strata.mjs';
+
+export { HANDWRITING_QUALITIES, PHOTO_QUALITIES, QUESTION_TYPE_KEYS, SUBJECTS } from './strata.mjs';
 
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value, max = 20000) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;

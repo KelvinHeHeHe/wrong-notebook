@@ -1,12 +1,21 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { O_NOFOLLOW, O_RDONLY } from 'node:constants';
-import { open } from 'node:fs/promises';
+import { open, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { isAbsolute } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { DatasetError, exportDatasetManifest, loadDatasetDraft, openDataset, saveDatasetDraft } from './dataset.mjs';
 
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
+const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+const STATIC_ASSETS = new Map([
+    ['/', { path: resolve(moduleDirectory, 'ui/index.html'), type: 'text/html; charset=utf-8' }],
+    ['/ui/styles.css', { path: resolve(moduleDirectory, 'ui/styles.css'), type: 'text/css; charset=utf-8' }],
+    ['/ui/app.mjs', { path: resolve(moduleDirectory, 'ui/app.mjs'), type: 'text/javascript; charset=utf-8' }],
+    ['/ui/model.mjs', { path: resolve(moduleDirectory, 'ui/model.mjs'), type: 'text/javascript; charset=utf-8' }],
+    ['/exam-evaluation/strata.mjs', { path: resolve(moduleDirectory, '../exam-evaluation/strata.mjs'), type: 'text/javascript; charset=utf-8' }],
+]);
 const SECURITY_HEADERS = {
     'Cache-Control': 'no-store',
     'Content-Security-Policy': "default-src 'self'; img-src 'self' blob:; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
@@ -109,6 +118,15 @@ export function createLabelerServer({ context, token }) {
         const url = new URL(request.url ?? '/', origin);
         if (url.pathname.startsWith('/api/') && !secureEqual(request.headers['x-evaluation-token'], token)) { sendError(response, 401, 'unauthorized'); return; }
         try {
+            const asset = STATIC_ASSETS.get(url.pathname);
+            if (asset) {
+                if (request.method !== 'GET') { sendError(response, 405, 'method_not_allowed'); return; }
+                const content = await readFile(asset.path);
+                writeHeaders(response, { 'Content-Type': asset.type, 'Content-Length': String(content.length) });
+                response.writeHead(200);
+                response.end(content);
+                return;
+            }
             if (url.pathname === '/api/state') {
                 if (request.method !== 'GET') { sendError(response, 405, 'method_not_allowed'); return; }
                 const draft = await loadDatasetDraft(context);

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>家庭样本评测标注器</title>
+    <link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+    <header class="topbar">
+        <div>
+            <p class="eyebrow">仅在本机运行 · 数据不写入错题本</p>
+            <h1>家庭样本评测标注器</h1>
+            <p id="progress" class="muted">正在读取私有样本……</p>
+        </div>
+        <div class="toolbar" aria-label="页面与保存操作">
+            <button id="previous-page" type="button">上一页</button>
+            <button id="next-page" type="button">下一页</button>
+            <button id="save-draft" type="button">保存草稿</button>
+            <button id="export-manifest" class="primary" type="button">导出评测清单</button>
+            <button id="reload-page" class="danger hidden" type="button">重新加载</button>
+        </div>
+    </header>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <main id="app-main" class="layout" aria-busy="true">
+        <section class="image-panel" aria-labelledby="page-title">
+            <div class="section-heading">
+                <h2 id="page-title">样本照片</h2>
+                <div class="page-tools">
+                    <button id="delete-missing-page" class="danger hidden" type="button">移除缺失页草稿</button>
+                    <span id="page-position" class="badge"></span>
+                </div>
+            </div>
+            <div id="image-stage" class="image-stage">
+                <img id="sample-image" alt="当前已脱敏的纸质作答照片">
+                <canvas id="region-canvas" tabindex="0" aria-label="拖拽框选当前答案的书写区域"></canvas>
+            </div>
+            <p class="hint">先在右侧选中一个期望答案，再在照片上拖拽框选 1～4 个书写区域。框应贴近学生实际书写或明确空白处。</p>
+        </section>
+
+        <aside class="editor" aria-label="样本标注字段">
+            <fieldset id="metadata-fields">
+                <legend>页面信息</legend>
+                <label>试卷标识<input id="paper-id" maxlength="200" autocomplete="off"></label>
+                <label>年级<select id="grade"></select></label>
+                <label>学科<select id="subject"></select></label>
+                <label>书写质量<select id="handwriting"></select></label>
+                <label>拍摄质量<select id="photo-quality"></select></label>
+                <label>识别语言<select id="language"></select></label>
+            </fieldset>
+
+            <section class="editor-section" aria-labelledby="questions-title">
+                <div class="section-heading">
+                    <h2 id="questions-title">候选题</h2>
+                    <button id="add-question" type="button">新增题目</button>
+                </div>
+                <div id="questions"></div>
+            </section>
+
+            <section class="editor-section" aria-labelledby="answers-title">
+                <div class="section-heading">
+                    <h2 id="answers-title">期望答案</h2>
+                    <button id="add-answer" type="button">新增答案</button>
+                </div>
+                <div id="answers"></div>
+            </section>
+
+            <section class="editor-section validation" aria-labelledby="validation-title">
+                <h2 id="validation-title">完成度检查</h2>
+                <ul id="validation-errors"></ul>
+            </section>
+        </aside>
+    </main>
+
+    <script type="module" src="/ui/app.mjs"></script>
+</body>
+</html>
