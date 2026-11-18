@@ -28,7 +28,13 @@ const server = createServer(async (request, response) => {
 const script = resolve('scripts/evaluate-exam-answer-extraction.mjs');
 const region = (index: number) => ({ x: 0.1, y: 0.05 + index * 0.2, width: 0.5, height: 0.1 });
 const candidate = (position: number, questionNumber: number, answer: string): ExamPageAnswerCandidate => ({ sourceShortId: `SRC00${questionNumber}`, displayNumber: questionNumber, recognizedAnswer: answer, notAttempted: false, confidence: 0.95, regions: [region(position)] });
-const expected = (position: number, questionNumber: number, answer: string) => ({ questionId: `q${questionNumber}`, normalizedAnswer: answer, regions: [region(position)] });
+type ExpectedAnswer = {
+    questionId: string;
+    normalizedAnswer: string;
+    questionType?: string;
+    regions: ReturnType<typeof region>[];
+};
+const expected = (position: number, questionNumber: number, answer: string): ExpectedAnswer => ({ questionId: `q${questionNumber}`, normalizedAnswer: answer, regions: [region(position)] });
 beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), 'exam-evaluation-test-'));
     await new Promise<void>((resolve_) => server.listen(0, '127.0.0.1', resolve_));

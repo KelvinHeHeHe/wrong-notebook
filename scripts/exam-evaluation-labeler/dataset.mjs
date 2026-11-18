@@ -65,7 +65,7 @@ export async function resolveRepositoryBoundaries(repositoryRoot) {
     return boundaries.sort();
 }
 
-export async function discoverDatasetImages({ datasetRoot, maxDepth = 8, maxEntries = 10000, maxImages = 1000 } = {}) {
+export async function discoverDatasetImages({ datasetRoot, maxDepth = 8, maxEntries = 10000, maxImages = 1000 }) {
     const root = await realpath(datasetRoot);
     let photos;
     try { photos = await realpath(join(root, 'photos')); }

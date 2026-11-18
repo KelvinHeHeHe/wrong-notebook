@@ -51,8 +51,8 @@ describe('家庭样本标注界面模型', () => {
         sample.questions.push({ id: 'q2', displayNumber: 2, sourceShortId: 'SRC002', questionText: '第二题' });
         sample.expected.push({ questionId: 'q2', normalizedAnswer: '8', questionType: 'calculation', regions: [{ x: 0.2, y: 0.5, width: 0.2, height: 0.1 }] });
         const updated = updateSample(sample, { type: 'removeQuestion', questionId: 'q1' });
-        expect(updated.questions.map((question) => question.id)).toEqual(['q2']);
-        expect(updated.expected.map((answer) => answer.questionId)).toEqual(['q2']);
+        expect(updated.questions.map((question: { id: string }) => question.id)).toEqual(['q2']);
+        expect(updated.expected.map((answer: { questionId: string }) => answer.questionId)).toEqual(['q2']);
         expect(sample.questions).toHaveLength(2);
     });
 
