@@ -17,7 +17,9 @@ let directory: string;
 let origin: string;
 let candidates: ExamPageAnswerCandidate[];
 let upstreamFails = false;
+let requestCount = 0;
 const server = createServer(async (request, response) => {
+    requestCount++;
     for await (const chunk of request) void chunk;
     response.setHeader('Content-Type', 'application/json');
     if (upstreamFails) { response.writeHead(400); response.end(JSON.stringify({ error: { message: '固定提取失败', type: 'invalid_request_error' } })); return; }
@@ -32,21 +34,24 @@ beforeAll(async () => {
     await new Promise<void>((resolve_) => server.listen(0, '127.0.0.1', resolve_));
     origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
-beforeEach(() => { upstreamFails = false; candidates = [candidate(0, 1, '低置信度答案'), candidate(1, 2, '另一答案')]; });
+beforeEach(() => { upstreamFails = false; requestCount = 0; candidates = [candidate(0, 1, '低置信度答案'), candidate(1, 2, '另一答案')]; });
 afterAll(async () => { server.closeAllConnections(); await new Promise<void>((resolve_) => server.close(() => resolve_())); await rm(directory, { recursive: true, force: true }); });
 async function run(args: string[]) {
     const env = { ...process.env, EVALUATION_PROVIDER: 'openai', EVALUATION_BASE_URL: `${origin}/v1`, EVALUATION_API_KEY: dummyKey, EVALUATION_MODEL: 'e2e-mock-model' };
     try { const result = await execute(process.execPath, ['--conditions=react-server', script, ...args], { env }); return { code: 0, ...result }; }
     catch (error) { const failure = error as Error & { code: number; stdout: string; stderr: string }; return { code: failure.code, stdout: failure.stdout, stderr: failure.stderr }; }
 }
-async function syntheticManifest(answers = [expected(0, 1, '低置信度答案'), expected(1, 2, '故意不同的答案'), expected(2, 3, '未检出')]) {
+async function syntheticManifest(
+    answers = [expected(0, 1, '低置信度答案'), expected(1, 2, '故意不同的答案'), expected(2, 3, '未检出')],
+    sampleOverrides: Record<string, unknown> = {},
+) {
     const input = join(directory, 'synthetic.json');
-    await writeFile(input, JSON.stringify({ samples: [{ image: resolve('src/__tests__/fixtures/images/math_test.png'), paperId: 'synthetic-paper', subject: '数学', handwriting: '合成',
-        questions: Array.from({ length: 5 }, (_, index) => ({ id: `q${index + 1}`, displayNumber: index + 1, sourceShortId: `SRC00${index + 1}`, questionText: '合成题' })), expected: answers }] }));
+    await writeFile(input, JSON.stringify({ samples: [{ image: resolve('src/__tests__/fixtures/images/math_test.png'), paperId: 'synthetic-paper',
+        questions: Array.from({ length: 5 }, (_, index) => ({ id: `q${index + 1}`, displayNumber: index + 1, sourceShortId: `SRC00${index + 1}`, questionText: '合成题' })), expected: answers, ...sampleOverrides }] }));
     return input;
 }
-async function evaluate(name: string, answers: ReturnType<typeof expected>[]) {
-    const input = await syntheticManifest(answers);
+async function evaluate(name: string, answers: ReturnType<typeof expected>[], sampleOverrides: Record<string, unknown> = {}) {
+    const input = await syntheticManifest(answers, sampleOverrides);
     const output = join(directory, `${name}.json`);
     const result = await run(['--manifest', input, '--output', output]);
     expect(result.code, result.stderr).toBe(0);
@@ -102,7 +107,7 @@ describe('本地纸质作答提取评测 CLI', () => {
     });
     it('复用真实提供商和匹配，报告不复制图片、Key 或答案原文', async () => {
         const report = await evaluate('report', [expected(0, 1, '低置信度答案'), expected(1, 2, '故意不同的答案'), expected(2, 3, '未检出')]);
-        expect(report).toMatchObject({ expectedCount: 3, matchedCount: 2, exactAnswerCount: 1, matchingAccuracy: 2 / 3, matchedExactAnswerAccuracy: 1 / 3, recommendedTarget: 0.95, meetsRecommendedTarget: false });
+        expect(report).toMatchObject({ version: 3, expectedCount: 3, matchedCount: 2, exactAnswerCount: 1, matchingAccuracy: 2 / 3, matchedExactAnswerAccuracy: 1 / 3, recommendedTarget: 0.95, meetsRecommendedTarget: false });
         expect(JSON.stringify(report)).not.toContain(dummyKey);
         expect(JSON.stringify(report)).not.toContain('base64');
         expect(JSON.stringify(report)).not.toContain('低置信度答案');
@@ -114,5 +119,47 @@ describe('本地纸质作答提取评测 CLI', () => {
         expect(result.stderr).toContain('提取失败');
         expect(result.stderr).not.toContain(dummyKey);
         await expect(readFile(join(directory, 'failed.json'))).rejects.toThrow();
+    });
+    it('旧 manifest 缺少分层字段时仍评测，并把各维度归入 unlabeled', async () => {
+        const report = await evaluate('unlabeled', [expected(0, 1, '低置信度答案')]);
+        const group = [{ value: 'unlabeled', expectedCount: 1, matchedCount: 1, exactAnswerCount: 1, matchingAccuracy: 1, matchedExactAnswerAccuracy: 1 }];
+        expect(report.breakdowns).toEqual({ grade: group, subject: group, questionType: group, handwriting: group, photoQuality: group });
+    });
+    it('完整元数据生成按年级、学科、题型、书写和拍摄质量分层的 v3 报告', async () => {
+        const answer = { ...expected(0, 1, '低置信度答案'), questionType: 'calculation' };
+        const report = await evaluate('stratified', [answer], { grade: 3, subject: '数学', handwriting: '清晰', photoQuality: '阴影' });
+        const metric = { expectedCount: 1, matchedCount: 1, exactAnswerCount: 1, matchingAccuracy: 1, matchedExactAnswerAccuracy: 1 };
+        expect(report).toMatchObject({
+            version: 3,
+            breakdowns: {
+                grade: [{ value: '3', ...metric }],
+                subject: [{ value: '数学', ...metric }],
+                questionType: [{ value: 'calculation', ...metric }],
+                handwriting: [{ value: '清晰', ...metric }],
+                photoQuality: [{ value: '阴影', ...metric }],
+            },
+            results: [{ grade: '3', subject: '数学', questionType: 'calculation', handwriting: '清晰', photoQuality: '阴影' }],
+        });
+    });
+    it('拒绝越界年级和未知题型，且不调用模型', async () => {
+        for (const [sampleOverrides, answers] of [
+            [{ grade: 7 }, [expected(0, 1, '答案')]],
+            [{ grade: 3 }, [{ ...expected(0, 1, '答案'), questionType: '口算题' }]],
+        ] as const) {
+            const input = await syntheticManifest([...answers], sampleOverrides);
+            const result = await run(['--manifest', input, '--output', join(directory, `invalid-strata-${requestCount}.json`)]);
+            expect(result.code).toBe(2);
+            expect(result.stderr).toContain('评测输入无效');
+            expect(requestCount).toBe(0);
+        }
+    });
+    it('全部页面校验完成后才发出第一次模型请求', async () => {
+        const input = await syntheticManifest([expected(0, 1, '答案')]);
+        const manifest = JSON.parse(await readFile(input, 'utf8'));
+        manifest.samples.push({ ...manifest.samples[0], image: 'missing-second-page.png', paperId: 'page-2' });
+        await writeFile(input, JSON.stringify(manifest));
+        const result = await run(['--manifest', input, '--output', join(directory, 'prevalidated.json')]);
+        expect(result.code).toBe(2);
+        expect(requestCount).toBe(0);
     });
 });

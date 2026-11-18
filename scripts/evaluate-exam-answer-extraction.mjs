@@ -1,56 +1,23 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
-import { readFile, realpath, stat, writeFile } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
+import { dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { resolveEvaluationInputs } from './exam-evaluation/manifest.mjs';
+import { buildEvaluationReport } from './exam-evaluation/report.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const fail = (message) => { throw new Error(message); };
-const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value, max = 20000) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
 const normalize = (value) => (value ?? '').normalize('NFC').trim().replace(/\s+/gu, ' ');
 
-async function inputs(args) {
+function inputPaths(args) {
     if (args.length !== 4 || args[0] !== '--manifest' || args[2] !== '--output' || !args[1] || !args[3]) {
         fail('用法：node --conditions=react-server scripts/evaluate-exam-answer-extraction.mjs --manifest <本地 JSON> --output <新报告 JSON>');
     }
-    const manifestPath = await realpath(resolve(args[1]));
-    const output = resolve(await realpath(dirname(resolve(args[3]))), args[3].split(sep).pop());
-    const fromRoot = relative(await realpath(root), output);
-    if (!fromRoot.startsWith(`..${sep}`) && fromRoot !== '..' && !isAbsolute(fromRoot)) fail('报告必须放在仓库外的私有目录');
-    if (output === manifestPath) fail('报告不能覆盖 manifest');
-    if ((await stat(manifestPath)).size > 10 * 1024 * 1024) fail('manifest 超过 10 MiB');
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-    if (!object(manifest) || !Array.isArray(manifest.samples) || !manifest.samples.length || manifest.samples.length > 1000) fail('samples 必须包含 1～1000 页');
-    const samples = [];
-    for (const [index, sample] of manifest.samples.entries()) {
-        if (!object(sample) || !text(sample.image, 4096) || !text(sample.paperId, 200) || !Array.isArray(sample.questions) || !sample.questions.length || sample.questions.length > 100 || !Array.isArray(sample.expected) || !sample.expected.length) fail(`第 ${index + 1} 页缺少 image、paperId、questions 或 expected`);
-        const ids = new Set();
-        const numbers = new Set();
-        const shortIds = new Set();
-        for (const question of sample.questions) {
-            if (!object(question) || !text(question.id, 200) || !text(question.sourceShortId, 200) || !text(question.questionText) || !Number.isInteger(question.displayNumber) || question.displayNumber < 1 || ids.has(question.id) || numbers.has(question.displayNumber) || shortIds.has(question.sourceShortId)) fail(`第 ${index + 1} 页候选题无效或标识重复`);
-            ids.add(question.id); numbers.add(question.displayNumber); shortIds.add(question.sourceShortId);
-        }
-        const expectedIds = new Set();
-        for (const expected of sample.expected) {
-            if (!object(expected) || !ids.has(expected.questionId) || expectedIds.has(expected.questionId) || typeof expected.normalizedAnswer !== 'string' || expected.normalizedAnswer.length > 20000) fail(`第 ${index + 1} 页期望题目未知、重复或答案无效`);
-            if (!Array.isArray(expected.regions) || expected.regions.length < 1 || expected.regions.length > 4 || expected.regions.some((region) => !object(region) ||
-                !['x', 'y', 'width', 'height'].every((key) => typeof region[key] === 'number' && Number.isFinite(region[key])) ||
-                region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0 || region.x + region.width > 1 || region.y + region.height > 1)) fail(`第 ${index + 1} 页人工标注区域必须为 1～4 个有效归一化框`);
-            expectedIds.add(expected.questionId);
-        }
-        if (sample.language !== undefined && !['zh', 'en'].includes(sample.language)) fail('language 只能为 zh 或 en');
-        const image = await realpath(resolve(dirname(manifestPath), sample.image));
-        if (image === output || !['.jpg', '.jpeg', '.png', '.webp'].includes(extname(image).toLowerCase())) fail('只支持本地 JPEG、PNG、WebP 图片');
-        const info = await stat(image);
-        if (!info.isFile() || info.size === 0 || info.size > 20 * 1024 * 1024) fail('图片必须为 1 字节～20 MiB 的普通文件');
-        samples.push({ ...sample, image });
-    }
-    // 在首次模型请求前检查目标，避免误覆盖已有报告。
-    try { await stat(output); fail('报告已存在，请指定新路径'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    return { samples, output };
+    return { manifestPath: args[1], outputPath: args[3] };
 }
 
 const MIN_REGION_IOU = 0.5;
@@ -99,13 +66,11 @@ function runtime() {
 async function main() {
     let input;
     let engine;
-    try { input = await inputs(process.argv.slice(2)); }
+    try { input = await resolveEvaluationInputs({ ...inputPaths(process.argv.slice(2)), repositoryRoot: root }); }
     catch (error) { process.stderr.write(`评测输入无效：${error.code ? '无法读取输入或输出目录' : error instanceof SyntaxError ? 'manifest 不是有效 JSON' : error.message}\n`); return 2; }
     try { engine = runtime(); }
     catch { process.stderr.write('评测配置无效：检查 Provider、模型、环境变量及 --conditions=react-server\n'); return 2; }
     const results = [];
-    let matchedCount = 0;
-    let exactAnswerCount = 0;
     for (const [index, sample] of input.samples.entries()) {
         try {
             const image = await readFile(sample.image);
@@ -120,21 +85,26 @@ async function main() {
                 const match = candidate && matching.matches.find((item) => item.candidateId === candidate.candidateId);
                 const matched = Boolean(match && match.questionId === expected.questionId);
                 const exact = matched && normalize(candidate.recognizedAnswer) === normalize(expected.normalizedAnswer);
-                if (matched) matchedCount++;
-                if (exact) exactAnswerCount++;
                 // 报告只保存定位标识与布尔结论，避免复制照片、学生答案及绝对路径。
-                results.push({ sample: index + 1, paperId: sample.paperId, questionId: expected.questionId, matched, exact });
+                results.push({
+                    sample: index + 1,
+                    paperId: sample.paperId,
+                    questionId: expected.questionId,
+                    matched,
+                    exact,
+                    grade: sample.grade === undefined ? 'unlabeled' : String(sample.grade),
+                    subject: sample.subject ?? 'unlabeled',
+                    questionType: expected.questionType ?? 'unlabeled',
+                    handwriting: sample.handwriting ?? 'unlabeled',
+                    photoQuality: sample.photoQuality ?? 'unlabeled',
+                });
             }
         } catch { process.stderr.write(`第 ${index + 1} 页提取失败；未生成报告，请检查模型配置或重试\n`); return 3; }
     }
-    const expectedCount = results.length;
-    const report = { version: 2, pairing: { method: 'mutual-best-region-iou', minIoU: MIN_REGION_IOU }, provider: engine.provider, model: engine.model, expectedCount, matchedCount, exactAnswerCount,
-        matchingAccuracy: matchedCount / expectedCount, matchedExactAnswerAccuracy: exactAnswerCount / expectedCount,
-        recommendedTarget: 0.95, meetsRecommendedTarget: exactAnswerCount / expectedCount >= 0.95,
-        minimumEvaluationSize: 60, sufficientSampleSize: expectedCount >= 60, results };
+    const report = buildEvaluationReport({ provider: engine.provider, model: engine.model, results });
     try { await writeFile(input.output, JSON.stringify(report, null, 2) + '\n', { flag: 'wx', mode: 0o600 }); }
     catch { process.stderr.write('报告写入失败；请检查目标路径和权限\n'); return 4; }
-    process.stdout.write(`评测 ${expectedCount} 题；匹配正确率 ${(report.matchingAccuracy * 100).toFixed(2)}%；匹配且答案完全一致率 ${(report.matchedExactAnswerAccuracy * 100).toFixed(2)}%\n`);
+    process.stdout.write(`评测 ${report.expectedCount} 题；匹配正确率 ${(report.matchingAccuracy * 100).toFixed(2)}%；匹配且答案完全一致率 ${(report.matchedExactAnswerAccuracy * 100).toFixed(2)}%\n`);
     return 0;
 }
 process.exitCode = await main();
