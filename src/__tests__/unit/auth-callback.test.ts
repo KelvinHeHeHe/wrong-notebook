@@ -13,6 +13,11 @@ describe('登录回跳地址', () => {
         '',
         'https://evil.example/exams/scan/Ab3xYz91',
         '//evil.example/exams/scan/Ab3xYz91',
+        '/\\evil.example/exams/scan/Ab3xYz91',
+        '/\n/evil.example/exams/scan/Ab3xYz91',
+        '/%5Cevil.example/exams/scan/Ab3xYz91',
+        '/%0A/evil.example/exams/scan/Ab3xYz91',
+        '/%25255Cevil.example/exams/scan/Ab3xYz91',
         'javascript:alert(1)',
         'exams/scan/Ab3xYz91',
     ])('拒绝非站内相对地址 %s 并回到首页', (value) => {
