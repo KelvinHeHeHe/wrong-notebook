@@ -5,6 +5,7 @@ import {
     SUBJECTS,
     LabelerModelError,
     containImageRect,
+    createLatestRequestGuard,
     markDraftConflict,
     normalizeDraggedRegion,
     updateSample,
@@ -32,6 +33,7 @@ const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById
 const state = {
     token: '', data: null, pageIndex: 0, selectedAnswer: 0,
     dirty: false, savePromise: null, conflicted: false, saveTimer: 0, imageUrl: '', dragStart: null,
+    imageReady: false, imageRequests: createLatestRequestGuard(),
 };
 
 function node(tag, { className, text, type } = {}) {
@@ -246,18 +248,44 @@ function drawRegions() {
 }
 
 async function loadImage() {
+    const generation = state.imageRequests.begin();
     if (state.imageUrl) URL.revokeObjectURL(state.imageUrl);
+    state.imageUrl = '';
+    state.imageReady = false;
+    elements['region-canvas'].classList.add('disabled');
+    elements['region-canvas'].setAttribute('aria-disabled', 'true');
+    elements['sample-image'].removeAttribute('src');
+    drawRegions();
     const sample = currentSample();
     const image = state.data.images.find((item) => item.image === sample.image);
     if (!image || sample.missing) {
-        elements['sample-image'].removeAttribute('src');
         setStatus('当前照片已缺失，请恢复文件或删除该草稿页', 'error');
-        drawRegions();
         return;
     }
-    const blob = await api(`/api/image/${encodeURIComponent(image.id)}`);
-    state.imageUrl = URL.createObjectURL(blob);
-    elements['sample-image'].src = state.imageUrl;
+    let blob;
+    try { blob = await api(`/api/image/${encodeURIComponent(image.id)}`); }
+    catch (error) { if (state.imageRequests.isCurrent(generation)) throw error; return; }
+    if (!state.imageRequests.isCurrent(generation)) return;
+    const imageUrl = URL.createObjectURL(blob);
+    state.imageUrl = imageUrl;
+    const loaded = new Promise((resolve_, reject) => {
+        const cleanup = () => {
+            elements['sample-image'].removeEventListener('load', onLoad);
+            elements['sample-image'].removeEventListener('error', onError);
+        };
+        const onLoad = () => { cleanup(); resolve_(); };
+        const onError = () => { cleanup(); reject(new Error('image_load_failed')); };
+        elements['sample-image'].addEventListener('load', onLoad);
+        elements['sample-image'].addEventListener('error', onError);
+    });
+    elements['sample-image'].src = imageUrl;
+    try { await loaded; }
+    catch (error) { if (state.imageRequests.isCurrent(generation)) throw error; return; }
+    if (!state.imageRequests.isCurrent(generation) || elements['sample-image'].src !== imageUrl) return;
+    state.imageReady = true;
+    elements['region-canvas'].classList.remove('disabled');
+    elements['region-canvas'].setAttribute('aria-disabled', 'false');
+    drawRegions();
 }
 
 function renderPage() {
@@ -341,9 +369,13 @@ function bindStaticControls() {
 
 function bindCanvas() {
     const canvas = elements['region-canvas'];
-    canvas.addEventListener('pointerdown', (event) => { state.dragStart = { x: event.clientX, y: event.clientY }; canvas.setPointerCapture(event.pointerId); });
+    canvas.addEventListener('pointerdown', (event) => {
+        if (!state.imageReady) return;
+        state.dragStart = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+    });
     canvas.addEventListener('pointerup', (event) => {
-        if (!state.dragStart || !currentSample()?.expected[state.selectedAnswer]) return;
+        if (!state.imageReady || !state.dragStart || !currentSample()?.expected[state.selectedAnswer]) { state.dragStart = null; return; }
         const canvasRect = canvas.getBoundingClientRect();
         const contentRect = containImageRect(canvasRect, elements['sample-image'].naturalWidth, elements['sample-image'].naturalHeight);
         const region = normalizeDraggedRegion(state.dragStart, { x: event.clientX, y: event.clientY }, contentRect);
@@ -352,7 +384,6 @@ function bindCanvas() {
         try { mutate({ type: 'addRegion', index: state.selectedAnswer, region }, true); }
         catch (error) { if (error instanceof LabelerModelError) setStatus('每个答案最多四个有效区域', 'error'); }
     });
-    elements['sample-image'].addEventListener('load', drawRegions);
     new ResizeObserver(drawRegions).observe(elements['image-stage']);
 }
 

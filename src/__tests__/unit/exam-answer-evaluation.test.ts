@@ -11,6 +11,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ExamPageAnswerCandidate } from '@/lib/ai/exam-answer-extraction';
 
+import { HANDWRITING_QUALITIES, PHOTO_QUALITIES, QUESTION_TYPE_KEYS, SUBJECTS } from '../../../scripts/exam-evaluation/manifest.mjs';
+
 const execute = promisify(execFile);
 const dummyKey = 'e2e-dummy-key';
 let directory: string;
@@ -128,24 +130,34 @@ describe('本地纸质作答提取评测 CLI', () => {
     });
     it('旧 manifest 缺少分层字段时仍评测，并把各维度归入 unlabeled', async () => {
         const report = await evaluate('unlabeled', [expected(0, 1, '低置信度答案')]);
-        const group = [{ value: 'unlabeled', expectedCount: 1, matchedCount: 1, exactAnswerCount: 1, matchingAccuracy: 1, matchedExactAnswerAccuracy: 1 }];
-        expect(report.breakdowns).toEqual({ grade: group, subject: group, questionType: group, handwriting: group, photoQuality: group });
+        const group = { value: 'unlabeled', expectedCount: 1, matchedCount: 1, exactAnswerCount: 1, matchingAccuracy: 1, matchedExactAnswerAccuracy: 1 };
+        for (const dimension of ['grade', 'subject', 'questionType', 'handwriting', 'photoQuality']) {
+            expect(report.breakdowns[dimension]).toContainEqual(group);
+        }
+        expect(report.breakdowns.grade).toHaveLength(7);
+        expect(report.breakdowns.subject).toHaveLength(SUBJECTS.length + 1);
+        expect(report.breakdowns.questionType).toHaveLength(QUESTION_TYPE_KEYS.length + 1);
+        expect(report.breakdowns.handwriting).toHaveLength(HANDWRITING_QUALITIES.length + 1);
+        expect(report.breakdowns.photoQuality).toHaveLength(PHOTO_QUALITIES.length + 1);
+        expect(report.breakdowns.subject).toContainEqual({ value: '数学', expectedCount: 0, matchedCount: 0, exactAnswerCount: 0, matchingAccuracy: 0, matchedExactAnswerAccuracy: 0 });
+    });
+    it('旧 manifest 的自由文本分层仍可评测，但不会进入报告枚举', async () => {
+        const report = await evaluate('legacy-strata', [expected(0, 1, '低置信度答案')], { subject: '旧自定义学科', handwriting: '合成' });
+        expect(report.results[0]).toMatchObject({ subject: 'unlabeled', handwriting: 'unlabeled' });
+        expect(JSON.stringify(report)).not.toContain('旧自定义学科');
+        expect(JSON.stringify(report)).not.toContain('合成');
     });
     it('完整元数据生成按年级、学科、题型、书写和拍摄质量分层的 v3 报告', async () => {
         const answer = { ...expected(0, 1, '低置信度答案'), questionType: 'calculation' };
         const report = await evaluate('stratified', [answer], { grade: 3, subject: '数学', handwriting: '清晰', photoQuality: '阴影' });
         const metric = { expectedCount: 1, matchedCount: 1, exactAnswerCount: 1, matchingAccuracy: 1, matchedExactAnswerAccuracy: 1 };
-        expect(report).toMatchObject({
-            version: 3,
-            breakdowns: {
-                grade: [{ value: '3', ...metric }],
-                subject: [{ value: '数学', ...metric }],
-                questionType: [{ value: 'calculation', ...metric }],
-                handwriting: [{ value: '清晰', ...metric }],
-                photoQuality: [{ value: '阴影', ...metric }],
-            },
-            results: [{ grade: '3', subject: '数学', questionType: 'calculation', handwriting: '清晰', photoQuality: '阴影' }],
-        });
+        expect(report).toMatchObject({ version: 3, results: [{ grade: '3', subject: '数学', questionType: 'calculation', handwriting: '清晰', photoQuality: '阴影' }] });
+        expect(report.breakdowns.grade).toContainEqual({ value: '3', ...metric });
+        expect(report.breakdowns.subject).toContainEqual({ value: '数学', ...metric });
+        expect(report.breakdowns.questionType).toContainEqual({ value: 'calculation', ...metric });
+        expect(report.breakdowns.handwriting).toContainEqual({ value: '清晰', ...metric });
+        expect(report.breakdowns.photoQuality).toContainEqual({ value: '阴影', ...metric });
+        expect(report.breakdowns.grade).toContainEqual({ value: '1', expectedCount: 0, matchedCount: 0, exactAnswerCount: 0, matchingAccuracy: 0, matchedExactAnswerAccuracy: 0 });
     });
     it('拒绝越界年级和未知题型，且不调用模型', async () => {
         for (const [sampleOverrides, answers] of [

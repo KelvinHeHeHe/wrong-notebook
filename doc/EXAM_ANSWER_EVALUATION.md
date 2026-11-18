@@ -92,7 +92,7 @@ node --conditions=react-server scripts/evaluate-exam-answer-extraction.mjs \
 
 例如两题的候选都提取到了，但短码和题号互换，即使答案文字都对，两个指标也都是 0%；4 题中 1 题完全正确、1 题匹配对但文字错、1 题匹配到别题、1 题漏提，指标为 50% 和 25%。框位置本身不足以区分的结果会保守记错，因此应同时审阅额外候选和人工框质量；这两项指标包含区域可定位性，不是独立的 OCR 字符准确率。
 
-报告 **version=3**，保留 `pairing.method=mutual-best-region-iou`、`pairing.minIoU=0.5`、逐题 `matched`/`exact` 布尔结论、计数、比例、模型标识和 `sufficientSampleSize`，并按年级、学科、题型、书写质量和拍摄质量输出固定分层汇总。旧 manifest 缺少分层字段时仍可评测并归入 `unlabeled`；新标注器导出时要求分层字段完整。不写入框坐标、照片或学生答案全文。version=1 只按模型标识检查候选存在性，version=2 没有完整分层，两者均不应与 v3 的分层结论直接混用。
+报告 **version=3**，保留 `pairing.method=mutual-best-region-iou`、`pairing.minIoU=0.5`、逐题 `matched`/`exact` 布尔结论、计数、比例、模型标识和 `sufficientSampleSize`，并按年级、学科、题型、书写质量和拍摄质量输出固定顺序的完整分层汇总；未覆盖的桶仍会出现，计数与准确率均为 0。旧 manifest 缺少分层字段或包含旧版自由文本学科/书写质量时仍可评测并归入 `unlabeled`；新标注器导出时要求分层字段完整。不写入框坐标、照片或学生答案全文。version=1 只按模型标识检查候选存在性，version=2 没有完整分层，两者均不应与 v3 的分层结论直接混用。
 
 **95%** 指推荐 Provider/视觉模型在不少于 60 道代表性客观题上的“匹配且答案完全一致率”产品目标，**不是所有可配置 Provider 的 CI 硬门槛**。低于目标仍生成报告并退出 0，便于比较；不足 60 题时 `sufficientSampleSize=false`，只能作为工具冒烟，不能宣称达到正式验收。未匹配和低置信度答案必须在产品中进入人工复核。
 

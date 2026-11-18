@@ -73,7 +73,7 @@ async function readWhitelistedImage(image) {
     try {
         handle = await open(image.absolutePath, O_RDONLY | O_NOFOLLOW);
         const info = await handle.stat();
-        if (!info.isFile() || info.size < 1 || info.size > 20 * 1024 * 1024) return null;
+        if (!info.isFile() || info.dev !== image.device || info.ino !== image.inode || info.size < 1 || info.size > 20 * 1024 * 1024) return null;
         return await handle.readFile();
     } catch {
         return null;

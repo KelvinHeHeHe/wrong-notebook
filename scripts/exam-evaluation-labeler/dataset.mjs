@@ -92,7 +92,9 @@ export async function discoverDatasetImages({ datasetRoot, maxDepth = 8, maxEntr
             const mimeType = IMAGE_EXTENSIONS.get(extname(item.name).toLowerCase());
             if (!mimeType) continue;
             if (info.size === 0 || info.size > 20 * 1024 * 1024) fail('DATASET_IMAGE', '图片大小必须为 1 字节～20 MiB');
-            images.push({ absolutePath, relativePath: relative(root, absolutePath).split(sep).join('/'), mimeType, size: info.size });
+            const canonicalPath = await realpath(absolutePath);
+            if (!inside(root, canonicalPath)) fail('DATASET_BOUNDARY', '图片必须位于私有数据集内');
+            images.push({ absolutePath: canonicalPath, relativePath: relative(root, absolutePath).split(sep).join('/'), mimeType, size: info.size, device: info.dev, inode: info.ino });
             if (images.length > maxImages) fail('DATASET_LIMIT', '数据集图片超过限制');
         }
     }

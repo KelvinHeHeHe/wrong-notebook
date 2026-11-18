@@ -12,19 +12,25 @@ const invalid = (message) => { throw new Error(message); };
 
 function validateStrata(sample, index, requireStrata) {
     if (sample.grade !== undefined && (!Number.isInteger(sample.grade) || sample.grade < 1 || sample.grade > 6)) invalid(`第 ${index + 1} 页 grade 必须为 1～6`);
-    if (sample.subject !== undefined && !member(sample.subject, SUBJECTS)) invalid(`第 ${index + 1} 页 subject 无效`);
-    if (sample.handwriting !== undefined && !member(sample.handwriting, HANDWRITING_QUALITIES)) invalid(`第 ${index + 1} 页 handwriting 无效`);
+    if (requireStrata && sample.subject !== undefined && !member(sample.subject, SUBJECTS)) invalid(`第 ${index + 1} 页 subject 无效`);
+    if (requireStrata && sample.handwriting !== undefined && !member(sample.handwriting, HANDWRITING_QUALITIES)) invalid(`第 ${index + 1} 页 handwriting 无效`);
     if (sample.photoQuality !== undefined && !member(sample.photoQuality, PHOTO_QUALITIES)) invalid(`第 ${index + 1} 页 photoQuality 无效`);
     if (requireStrata && (sample.grade === undefined || sample.subject === undefined || sample.handwriting === undefined || sample.photoQuality === undefined)) {
         invalid(`第 ${index + 1} 页缺少完整分层字段`);
     }
+    return {
+        grade: sample.grade,
+        subject: member(sample.subject, SUBJECTS) ? sample.subject : undefined,
+        handwriting: member(sample.handwriting, HANDWRITING_QUALITIES) ? sample.handwriting : undefined,
+        photoQuality: sample.photoQuality,
+    };
 }
 
 export function validateEvaluationManifest(value, { requireStrata = false } = {}) {
     if (!object(value) || !Array.isArray(value.samples) || !value.samples.length || value.samples.length > 1000) invalid('samples 必须包含 1～1000 页');
     const samples = value.samples.map((sample, index) => {
         if (!object(sample) || !text(sample.image, 4096) || !text(sample.paperId, 200) || !Array.isArray(sample.questions) || !sample.questions.length || sample.questions.length > 100 || !Array.isArray(sample.expected) || !sample.expected.length) invalid(`第 ${index + 1} 页缺少 image、paperId、questions 或 expected`);
-        validateStrata(sample, index, requireStrata);
+        const strata = validateStrata(sample, index, requireStrata);
         const ids = new Set();
         const numbers = new Set();
         const shortIds = new Set();
@@ -43,7 +49,7 @@ export function validateEvaluationManifest(value, { requireStrata = false } = {}
             expectedIds.add(expected.questionId);
         }
         if (sample.language !== undefined && !['zh', 'en'].includes(sample.language)) invalid('language 只能为 zh 或 en');
-        return { ...sample, questions: sample.questions.map((question) => ({ ...question })), expected: sample.expected.map((expected) => ({ ...expected, regions: expected.regions.map((region) => ({ ...region })) })) };
+        return { ...sample, ...strata, questions: sample.questions.map((question) => ({ ...question })), expected: sample.expected.map((expected) => ({ ...expected, regions: expected.regions.map((region) => ({ ...region })) })) };
     });
     return { samples };
 }

@@ -6,6 +6,7 @@ import {
     QUESTION_TYPE_KEYS,
     addRegion,
     containImageRect,
+    createLatestRequestGuard,
     markDraftConflict,
     normalizeDraggedRegion,
     updateSample,
@@ -75,5 +76,13 @@ describe('家庭样本标注界面模型', () => {
     it('完整草稿可导出，revision 冲突会进入只读重载状态', () => {
         expect(validateDraftProgress({ version: 1, revision: 2, samples: [completeSample()] })).toMatchObject({ complete: true, completedPages: 1 });
         expect(markDraftConflict({ conflicted: false, dirty: true })).toEqual({ conflicted: true, dirty: false });
+    });
+
+    it('翻页后的新图片请求会使上一页的迟到响应失效', () => {
+        const guard = createLatestRequestGuard();
+        const firstPage = guard.begin();
+        const secondPage = guard.begin();
+        expect(guard.isCurrent(firstPage)).toBe(false);
+        expect(guard.isCurrent(secondPage)).toBe(true);
     });
 });

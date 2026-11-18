@@ -132,3 +132,11 @@ export function validateDraftProgress(draft) {
 export function markDraftConflict(state) {
     return { ...state, conflicted: true, dirty: false };
 }
+
+export function createLatestRequestGuard() {
+    let generation = 0;
+    return {
+        begin() { generation++; return generation; },
+        isCurrent(value) { return value === generation; },
+    };
+}

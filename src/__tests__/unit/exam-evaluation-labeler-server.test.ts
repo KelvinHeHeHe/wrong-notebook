@@ -186,6 +186,26 @@ describe('家庭样本评测标注服务', () => {
         expect(response.body).not.toContain('outside-dataset-secret');
     });
 
+    it('拒绝启动后被替换为数据集外符号链接的中间目录', async () => {
+        await running?.close();
+        running = undefined;
+        await rm(join(datasetPath, 'photos', 'private-page.jpg'));
+        const nested = join(datasetPath, 'photos', 'nested');
+        await mkdir(nested);
+        await writeFile(join(nested, 'page.jpg'), Buffer.alloc(32, 1));
+        output = '';
+        running = await startLabeler({ datasetPath, repositoryRoot, token, output: { write: (value: string) => { output += value; return true; } } });
+        const state = JSON.parse((await rawRequest('/api/state', { headers: authorizedHeaders() })).body);
+        const outside = join(temporaryRoot, 'outside');
+        await mkdir(outside);
+        await writeFile(join(outside, 'page.jpg'), 'outside-parent-secret');
+        await rm(nested, { recursive: true });
+        await symlink(outside, nested);
+        const response = await rawRequest(`/api/image/${state.images[0].id}`, { headers: authorizedHeaders() });
+        expect(response.status).toBe(404);
+        expect(response.body).not.toContain('outside-parent-secret');
+    });
+
     it('写请求要求精确 Origin 和 JSON Content-Type，并限制请求体为 2 MiB', async () => {
         const host = new URL(running!.origin).host;
         const base = authorizedHeaders({ 'Content-Type': 'application/json' });
