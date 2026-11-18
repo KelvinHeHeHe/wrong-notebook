@@ -100,9 +100,9 @@
 
 | 命令 | 结果 |
 | --- | --- |
-| `npm_config_registry=https://registry.npmjs.org RUST_LOG=info TELEMETRY_DISABLED=false bash scripts/ci.sh` | 通过：依赖、Prisma、lint、314 个 Vitest 文件/4143 个用例、11 个 publication 用例、公开历史、脚本语法、TypeScript 与生产构建 |
+| `npm_config_registry=https://registry.npmjs.org RUST_LOG=info TELEMETRY_DISABLED=false bash scripts/ci.sh` | 通过：依赖、Prisma、lint、315 个 Vitest 文件/4155 个用例、11 个 publication 用例、公开历史、脚本语法、TypeScript 与生产构建 |
 | `npm run test:e2e` | 通过：97/97 Chromium，0 unexpected、0 flaky、0 skipped，耗时约 3.3 分钟 |
-| `python3 scripts/check-public-history.py HEAD` | 通过：公开基线之后 12381 个可达对象及全历史私有路径检查通过 |
+| `python3 scripts/check-public-history.py HEAD` | 通过：公开基线之后 12449 个可达对象及全历史私有路径检查通过 |
 | `rg -n "npmmirror" package-lock.json` | 通过：无输出，锁文件未引用该镜像 |
 | 业务 Schema、迁移和备份实现差异检查 | 通过：无输出 |
 
@@ -110,13 +110,13 @@
 
 | 项目 | 值 |
 | --- | --- |
-| 被验收提交 | `1ae05471e6c0a23c7da079867b59ed63cfbdcc46` |
+| 被验收提交 | `46d1aca3a08323e5aeb71abc924fd2448cf5c3b7` |
 | Next.js | 16.4.3 → 16.4.6 |
 | 系统 | macOS 15.8.1（Build 24H32），Apple Silicon |
 | Node.js | v26.9.0 |
 | npm | 11.19.1 |
 | Python | 3.13.5 |
-| Playwright 报告 | `/var/folders/hm/1zxwv_s97n37fv5w06g9qzj80000gn/T/wrong-notebook-e2e-vbbn16/report` |
+| Playwright 报告 | `/var/folders/hm/1zxwv_s97n37fv5w06g9qzj80000gn/T/wrong-notebook-e2e-SXun3B/report` |
 
 完整 CI 的生产构建退出 0；Turbopack 对 `src/lib/background-tasks.ts` 的动态文件读取保留一条既有跟踪范围警告，不影响本次构建，但可在第二批独立评估打包体积。报告自身的结果提交不作为自引用“最终 SHA”；上表锚定的是写入结果前已通过门禁的提交。
 

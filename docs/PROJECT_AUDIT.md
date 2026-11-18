@@ -114,7 +114,7 @@
 | 验证 | 结果 |
 | --- | --- |
 | `npm run lint` | 通过，0 警告 |
-| `RUST_LOG=info TELEMETRY_DISABLED=false npm test` | 314 个文件、4143 个用例通过 |
+| `RUST_LOG=info TELEMETRY_DISABLED=false npm test` | 315 个文件、4155 个用例通过 |
 | `npm run test:e2e` | 97/97 Chromium 用例通过 |
 | 近端旧库迁移特征测试 | 6/6 通过 |
 | 备份真实 SQLite 集成测试 | 56/56 通过 |
