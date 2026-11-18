@@ -62,8 +62,25 @@ describe('家庭样本评测标注服务', () => {
         }
     });
 
-    it('通过 npm 正式入口完成草稿导出并在 SIGTERM 后正常退出', async () => {
-        const child = spawn('npm', ['run', '--silent', 'eval:label', '--', '--dataset', datasetPath], {
+    it('npm 正式入口会执行标注器并拒绝无效参数', async () => {
+        const child = spawn('npm', ['run', '--silent', 'eval:label', '--', '--dataset', 'relative'], {
+            cwd: repositoryRoot,
+            env: { ...process.env, NO_COLOR: '1' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stderr = '';
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+        const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve_) => {
+            child.once('exit', (code, signal) => resolve_({ code, signal }));
+        });
+
+        expect(exit).toEqual({ code: 2, signal: null });
+        expect(stderr).toContain('标注器启动失败');
+    });
+
+    it('真实 CLI 完成草稿导出并在 SIGTERM 后正常退出', async () => {
+        const child = spawn(process.execPath, [resolve(repositoryRoot, 'scripts/exam-evaluation-labeler.mjs'), '--dataset', datasetPath], {
             cwd: repositoryRoot,
             env: { ...process.env, NO_COLOR: '1' },
             stdio: ['ignore', 'pipe', 'pipe'],
